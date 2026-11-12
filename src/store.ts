@@ -4,6 +4,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { MemoryFile } from './audit.ts'
+import { wslCommand, wslOf, type Wsl } from './place.ts'
 
 export interface ProjectSummary {
   /** Folder name under ~/.claude/projects, e.g. `-Users-me-Dev-app`. */
@@ -73,10 +74,27 @@ export async function readMemoryFolder(slug: string, root = projectsRoot()): Pro
   )
 }
 
-function git(cwd: string, args: readonly string[]): Promise<string | null> {
+function run(file: string, args: readonly string[], cwd?: string): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' }, (error, stdout) => resolve(error ? null : stdout))
+    execFile(file, args, { ...(cwd ? { cwd } : {}), maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' }, (error, stdout) => resolve(error ? null : stdout))
   })
+}
+/** Git in the checkout; for one on a WSL share, inside its distribution. */
+function git(cwd: string, args: readonly string[]): Promise<string | null> {
+  const w = wslOf(cwd)
+  return w ? run('wsl.exe', wslCommand(w, 'git', args)) : run('git', args, cwd)
+}
+
+const homes = new Map<string, Promise<string | null>>()
+/** The Linux home of the distribution's default user, asked once per distribution. */
+export function wslHome(w: Pick<Wsl, 'distro'>): Promise<string | null> {
+  const key = w.distro.toLowerCase()
+  let home = homes.get(key)
+  if (!home) {
+    home = run('wsl.exe', ['-d', w.distro, '-e', 'sh', '-c', 'printf %s "$HOME"']).then((out) => (out?.trim().startsWith('/') ? out.trim() : null))
+    homes.set(key, home)
+  }
+  return home
 }
 const nulSplit = (out: string): string[] => out.split('\0').filter(Boolean)
 

@@ -26,7 +26,9 @@ export interface PanelView {
   project: ProjectView | null
   workspace: string | null
   unmatched?: boolean
-  /** The focused workspace is on WSL or SSH: its memory is there, out of the plugin's reach. */
+  /** With `unmatched`: the look-alike workspaces, for the person to say which one is in front. */
+  twins?: { id: string; label: string; detail: string }[]
+  /** The focused workspace is on an SSH host: its memory is there, out of the plugin's reach. */
   remote?: boolean
 }
 
@@ -45,6 +47,8 @@ declare module 'orca' {
     'memory.verify': { input: Spoken; output: { count: number; workspace: string } }
     /** The person saw these memories (all new ones when `files` is left out). */
     'memory.seen': { input: { slug: string; files?: string[] }; output: { ok: true } }
+    /** The person says which look-alike workspace is in front: remembered through its terminals. */
+    'workspace.pick': { input: { workspaceId: string } & Spoken; output: { ok: true } }
   }
   interface PluginPanelEvents {
     /** Claude wrote a memory (or the index) of this project: open panels reload it. */

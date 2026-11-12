@@ -18,15 +18,15 @@ An independent project, not made or endorsed by Anthropic or Stably.*
 ## Install
 
 Requirements: Orca **1.4.248** or newer, [Claude Code](https://claude.com/claude-code), `git`, and
-local workspaces on macOS, Linux or Windows (not WSL or SSH: see [Limits](#limits)).
+workspaces on macOS, Linux, Windows or WSL (not SSH: see [Limits](#limits)).
 
 In Orca, open **Settings → Plugins → Add plugin → From Git URL** and enter:
 
 ```text
-https://github.com/PierreB40/claude-memory#v0.4.0
+https://github.com/PierreB40/claude-memory#v0.4.1
 ```
 
-or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.0`.
+or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.1`.
 
 Then open the **Claude Memory** panel in the right sidebar, or click the book in the status bar.
 
@@ -37,7 +37,8 @@ Then open the **Claude Memory** panel in the right sidebar, or click the book in
 ## What it does
 
 **A panel that follows the focused workspace**, like Orca's own tabs: switch workspace and it
-switches project. A fixed header (project, branch, *Verify*, tabs, search, type filter) sits
+switches project. When two workspaces share a name and a branch, it tells them apart by the folder
+their terminals show, or asks you once (see [Limits](#limits)). A fixed header (project, branch, *Verify*, tabs, search, type filter) sits
 over grouped lists:
 
 - **To verify**: the memories that are maybe no longer true. That covers cited files found neither
@@ -102,18 +103,19 @@ Clicking it shows or hides the sidebar.
 - **Code checks see the focused workspace and the default branch.** A file that exists only on a
   third branch reads as missing.
 - **Two workspaces with the same name on the same branch** (every main checkout is `main` on
-  `main`) are told apart only by their terminals. Orca tells a panel only the focused workspace's
-  name, branch and terminals, so the panel knows which one it is once an agent has run in one of
-  them. Until then, it says so instead of guessing.
-- **Local workspaces only: not WSL, not SSH.** On a WSL distribution or an SSH host, the code and
-  Claude's memory (`~/.claude/projects` there) stay on that host, and the plugin reads only the
-  machine Orca runs on. For such a workspace:
-  - the panel says it is on another host, and the status bar stays hidden;
-  - *Verify* is not offered;
-  - Orca does not hook the agents running there yet, so their memory writes bring no notification
-    and their reads are not counted.
-
-  Claude Code run natively on Windows, in a local workspace, is supported.
+  `main`, or one `v8` per sub-project). Orca tells a plugin only the focused workspace's name,
+  branch and terminals, so the panel tells them apart by the folder a terminal's title shows
+  (`me@pc: ~/Dev/shop`, as bash and zsh set it), or by a terminal an agent ran in. When neither
+  tells, it asks which one it is, and remembers the answer through that workspace's terminals.
+- **WSL: read through the `\\wsl.localhost` share.** For a workspace in a WSL distribution, the
+  plugin reads Claude's memory in the Linux home (`~/.claude/projects` there, found from the
+  workspace's `/home/<user>` path, else asked of the distribution), and runs `git` inside the
+  distribution with `wsl.exe`. A `CLAUDE_CONFIG_DIR` set inside WSL is not followed. Notifications
+  and read counts need Orca to report the tool calls of agents running in WSL, which it may not do
+  yet: the panel and the status bar work without them.
+- **Not SSH.** On an SSH host, the code and Claude's memory stay on that machine and the plugin
+  reads only the one Orca runs on: the panel says the workspace is on another host, the status bar
+  stays hidden, and *Verify* is not offered.
 - **Verify on Windows.** On macOS and Linux, *Verify* passes the request on the command line
   (`claude '…'`). On Windows, where terminals are PowerShell or cmd, Orca launches Claude and sends
   the request once it is ready.

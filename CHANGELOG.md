@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1
+
+- WSL on Windows: a workspace in a WSL distribution finds its Claude's memory in the Linux home,
+  read through the `\\wsl.localhost` share, with its folder named after the Linux path as Claude
+  in WSL names it. `git` runs inside the distribution, where Git for Windows would refuse the
+  repository; *Verify* gives Claude the Linux path of its memory. Only SSH workspaces are still out
+  of reach.
+- Look-alike workspaces (`main` on `main` in several repositories, one `v8` per sub-project) are
+  told apart by the folder their terminals' titles show, the deepest when nested. When no title
+  tells, the panel asks which one it is, one row per workspace with its project and path, and
+  remembers the answer through its terminals.
+- In a narrow panel, *Verify* and *Reload* drop under the project's name instead of being cut off.
+- When nothing is found, `orca plugin logs` says which folders were tried, and where.
+
 ## 0.4.0
 
 - Two workspaces of the same name on the same branch (every repository's main checkout is

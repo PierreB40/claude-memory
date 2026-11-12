@@ -145,6 +145,20 @@ async function verify(): Promise<void> {
   }
 }
 
+/** The person says which look-alike is in front: the worker remembers it by its terminals. */
+async function pickTwin(workspaceId: string): Promise<void> {
+  set(busy, true)
+  set(said, null)
+  try {
+    await plugin.request('workspace.pick', { workspaceId, ...locale() })
+    await load()
+  } catch (e) {
+    set(said, { ok: false, text: message(e) })
+  } finally {
+    set(busy, false)
+  }
+}
+
 /** Leaving the recent tab is having seen what Claude learned there. */
 function showTab(next: string): void {
   const s = read(state)
@@ -283,7 +297,8 @@ function Header({ p }: { p: ProjectView }) {
   const feedback = read(said)
   return (
     <Stack gap="xs">
-      <Row justify="between" align="center">
+      {/* Narrow, the actions drop under the title instead of being cut off at the edge. */}
+      <Row justify="between" align="center" gap="xs" wrap>
         <Stack gap="none">
           <Text weight="semibold" truncate>
             {p.label}
@@ -461,8 +476,33 @@ export default function Panel() {
   }
   if (!s.workspace) return <EmptyState icon="folder" title={w.noWorkspace.title} description={w.noWorkspace.description} />
   if (s.unmatched) {
-    const a = w.ambiguous(s.workspace)
-    return <EmptyState icon="folder" title={a.title} description={a.description} />
+    const feedback = read(said)
+    if (!s.twins?.length) {
+      const a = w.ambiguous(s.workspace)
+      return <EmptyState icon="folder" title={a.title} description={a.description} />
+    }
+    // Asked like Orca's own pickers: one row per look-alike, its project and where it lives.
+    const q = w.whichOne(s.workspace)
+    return (
+      <Stack gap="sm">
+        <Stack gap="none">
+          <Text weight="semibold">{q.title}</Text>
+          <Text size="xs" muted>
+            {q.description}
+          </Text>
+        </Stack>
+        <List label={q.title}>
+          {s.twins.map((c) => (
+            <ListItem icon="folder" title={c.label} description={c.detail} disabled={read(busy)} onPress={() => void pickTwin(c.id)} />
+          ))}
+        </List>
+        {feedback && !feedback.ok ? (
+          <Text size="xs" tone="danger">
+            {feedback.text}
+          </Text>
+        ) : null}
+      </Stack>
+    )
   }
   if (s.remote) {
     const r = w.remote(s.workspace)
