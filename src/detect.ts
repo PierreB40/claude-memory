@@ -69,3 +69,18 @@ export function writtenPath(tool: string, input: unknown): string | null {
   const path = (input as { file_path?: unknown }).file_path
   return typeof path === 'string' ? path : null
 }
+
+/**
+ * The shell line that starts Claude Code with its first message: single-quoted, so nothing in the
+ * prompt (backticks, `$`, quotes) is read by the shell. Passing the prompt on the command line
+ * does not depend on the agent being ready, unlike typing it in afterwards.
+ */
+export function claudeCommand(prompt: string): string {
+  return `claude '${prompt.replace(/'/g, `'\\''`)}'`
+}
+
+/** The workspace where Claude should check a project: the focused one when it is that project. */
+export function workspaceFor<W extends { path: string; gitFile: string | null }>(slug: string, focused: W | null, all: readonly W[]): W | null {
+  if (focused && candidateSlugs(focused.path, focused.gitFile).includes(slug)) return focused
+  return all.find((w) => candidateSlugs(w.path, w.gitFile).includes(slug)) ?? null
+}

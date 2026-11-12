@@ -28,8 +28,8 @@ declare module 'orca' {
     'memory.view': { input: { slug?: string }; output: ProjectView | null }
     /** One memory's text, without its header. */
     'memory.read': { input: { slug: string; file: string }; output: { body: string } }
-    /** Hands memories to a Claude agent: every one to verify, or those the branch broke. */
-    'memory.verify': { input: { slug: string; scope: VerifyScope }; output: { via: 'terminal' | 'launch'; count: number } }
+    /** Starts a new Claude in a terminal of the project's workspace, the memories to verify (or those the branch broke) as its first message. */
+    'memory.verify': { input: { slug: string; scope: VerifyScope }; output: { count: number; workspace: string } }
     /** The person saw what Claude learned: clears the « new » marks and the status bar count. */
     'memory.seen': { input: { slug: string }; output: { ok: true } }
   }

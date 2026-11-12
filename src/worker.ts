@@ -3,7 +3,7 @@
 // palette commands. It never writes a memory: fixing is handed to a Claude agent.
 import type { OrcaWorkerApi } from 'orca/worker'
 import { audit, bodyOf, branchPrompt, DEFAULT_OPTIONS, toVerify, verifyPrompt } from './audit.ts'
-import { candidateSlugs, matchWorkspace, memoryOfPath, repoOfSlug, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { candidateSlugs, claudeCommand, matchWorkspace, memoryOfPath, repoOfSlug, workspaceFor, writtenPath, type WorkspaceInfo } from './detect.ts'
 import type { ProjectView, VerifyScope } from './protocol.ts'
 import { baseRef, currentBranch, filesAt, listProjects, memoryDir, projectsRoot, readGitFile, readMemory, readMemoryFolder, trackedFiles } from './store.ts'
 
@@ -95,10 +95,11 @@ async function refreshStatus(orca: OrcaWorkerApi): Promise<void> {
   })
 }
 
-/** Agents whose turn is over: typing into a working one would interleave with its output. */
-const IDLE = new Set(['waiting', 'done'])
-
-async function handOver(orca: OrcaWorkerApi, slug: string, scope: VerifyScope): Promise<{ via: 'terminal' | 'launch'; count: number }> {
+/**
+ * Always a NEW Claude, in its own terminal: typing into an existing one could land in a
+ * conversation the person is having, and an idle-looking agent is not a free one.
+ */
+async function handOver(orca: OrcaWorkerApi, slug: string, scope: VerifyScope): Promise<{ count: number; workspace: string }> {
   const current = await view(orca, slug)
   if (!current) throw new Error('Aucune mémoire.')
   const dir = memoryDir(current.slug, await rootOf(orca))
@@ -116,16 +117,11 @@ async function handOver(orca: OrcaWorkerApi, slug: string, scope: VerifyScope): 
     count = memories.length + (current.indexProblems.length ? 1 : 0)
   }
 
-  const { agents } = await orca.host.call('agents.list')
-  const idle = agents.find((a) => a.terminalId && a.agent === 'claude' && IDLE.has(a.state))
-  if (idle?.terminalId) {
-    const { accepted } = await orca.host.call('terminal.sendText', { terminalId: idle.terminalId, text: prompt, enter: true })
-    if (accepted) return { via: 'terminal', count }
-  }
-  const { focused } = await workspaces(orca)
-  if (!focused) throw new Error('Aucun workspace Orca au premier plan pour lancer Claude.')
-  await orca.host.call('agent.launch', { workspaceId: focused.id, agent: 'claude', prompt })
-  return { via: 'launch', count }
+  const { all, focused } = await workspaces(orca)
+  const target = workspaceFor(current.slug, focused, all)
+  if (!target) throw new Error('Aucun workspace Orca n’ouvre ce projet : ouvre-le pour que Claude puisse lire son code.')
+  await orca.host.call('terminal.create', { workspaceId: target.id, title: 'Claude · mémoire', command: claudeCommand(prompt) })
+  return { count, workspace: target.name }
 }
 
 export default function activate(orca: OrcaWorkerApi): void {
@@ -143,8 +139,8 @@ export default function activate(orca: OrcaWorkerApi): void {
     const v = await view(orca)
     if (!v) return 'Claude n’a encore aucune mémoire.'
     const scope: VerifyScope = v.memories.some((m) => m.brokenHere.length) ? 'branch' : 'all'
-    const { via, count } = await handOver(orca, v.slug, scope)
-    return via === 'terminal' ? `${count} envoyée(s) à Claude.` : `Claude lancé avec ${count} mémoire(s) à vérifier.`
+    const { count, workspace } = await handOver(orca, v.slug, scope)
+    return `Claude lancé dans « ${workspace} » avec ${count} mémoire(s) à vérifier.`
   })
   orca.commands.register('show', async () => {
     await orca.host.call('commands.run', { action: 'sidebar.right.toggle' })

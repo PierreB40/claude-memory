@@ -14,7 +14,6 @@ async function until(worker: { request(name: 'memory.projects'): Promise<unknown
   assert.ok(done(), 'the background work never finished')
 }
 
-const focused = { branch: 'demo', displayName: 'demo', terminals: [] }
 
 test('lists the projects that have memories, most first', async () => {
   const worker = await mountWorker(main, { host: host() })
@@ -54,30 +53,25 @@ test('keeps the status bar on the health of the memory', async () => {
   await worker.deactivate()
 })
 
-test('types the verification into an idle Claude agent, on one line', async () => {
-  const h = host({
-    'agents.list': { agents: [{ terminalId: 't1', title: 'Claude', agent: 'claude', state: 'waiting', stateStartedAt: 0 }] },
-    'terminal.sendText': { accepted: true }
-  })
+/** A workspace whose path Claude Code would name '-demo-broken': the fixture project's checkout. */
+const brokenWs = { id: 'w1', kind: 'worktree', name: 'broken', path: '/demo/broken', branch: 'refs/heads/main', hostId: null }
+
+test('starts a NEW Claude in the workspace of the project, the request as its first message', async () => {
+  const h = host({ 'workspace.list': { workspaces: [brokenWs], truncated: false }, 'terminal.create': { terminalId: 't9' } })
   const worker = await mountWorker(main, { host: h })
-  assert.deepEqual(await worker.request('memory.verify', { slug: '-demo-broken', scope: 'all' }), { via: 'terminal', count: 4 })
-  const sent = h.calls.find((c) => c.method === 'terminal.sendText')?.params as { terminalId: string; text: string }
-  assert.equal(sent.terminalId, 't1')
-  assert.ok(!sent.text.includes('\n'))
+  assert.deepEqual(await worker.request('memory.verify', { slug: '-demo-broken', scope: 'all' }), { count: 4, workspace: 'broken' })
+  const created = h.callsOf('terminal.create')[0] as { workspaceId: string; command: string }
+  assert.equal(created.workspaceId, 'w1')
+  assert.ok(created.command.startsWith("claude '"))
+  assert.ok(!created.command.includes('\n'))
+  assert.ok(!h.calls.some((c) => c.method === 'terminal.sendText' || c.method === 'agent.launch'))
   await assert.rejects(worker.request('memory.verify', { slug: '-demo-broken', scope: 'branch' }))
   await worker.deactivate()
 })
 
-test('launches Claude in the focused workspace when every agent is busy', async () => {
-  const h = host({
-    'workspace.readContext': focused,
-    'workspace.list': { workspaces: [{ id: 'w1', kind: 'worktree', name: 'demo', path: '/nowhere/demo', branch: 'refs/heads/demo', hostId: null }], truncated: false },
-    'agents.list': { agents: [{ terminalId: 't1', title: 'Claude', agent: 'claude', state: 'working', stateStartedAt: 0 }] },
-    'agent.launch': { terminalId: 't2' }
-  })
-  const worker = await mountWorker(main, { host: h })
-  assert.deepEqual(await worker.request('memory.verify', { slug: '-demo-broken', scope: 'all' }), { via: 'launch', count: 4 })
-  assert.ok(!h.calls.some((c) => c.method === 'terminal.sendText'))
+test('refuses when no Orca workspace opens the project', async () => {
+  const worker = await mountWorker(main, { host: host() })
+  await assert.rejects(worker.request('memory.verify', { slug: '-demo-broken', scope: 'all' }), /Aucun workspace/)
   await worker.deactivate()
 })
 

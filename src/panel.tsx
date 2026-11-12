@@ -144,7 +144,7 @@ async function verify(scope: VerifyScope): Promise<void> {
   set(sent, null)
   try {
     const answer = await plugin.request('memory.verify', { slug: p.slug, scope }, { timeoutMs: 60_000 })
-    const who = answer.via === 'terminal' ? 'Envoyé à Claude.' : 'Claude lancé dans un nouveau terminal.'
+    const who = `Claude lancé dans un nouveau terminal de « ${answer.workspace} ».`
     set(sent, {
       ok: true,
       text: scope === 'branch' ? `${who} Il mettra ces mémoires à jour dans ta branche.` : `${who} Il corrigera et proposera les suppressions sans les faire.`

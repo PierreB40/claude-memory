@@ -74,13 +74,7 @@
       "kind": "workspace:write"
     },
     {
-      "kind": "agent:read"
-    },
-    {
       "kind": "terminal:send"
-    },
-    {
-      "kind": "agent:launch"
     },
     {
       "kind": "notifications:show"

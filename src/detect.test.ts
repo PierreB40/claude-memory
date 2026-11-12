@@ -1,5 +1,6 @@
 import { assert, test } from 'orca/testing'
-import { candidateSlugs, mainCheckoutOf, matchWorkspace, memoryOfPath, repoOfSlug, slugOf, writtenPath } from './detect.ts'
+import { execFileSync } from 'node:child_process'
+import { candidateSlugs, claudeCommand, mainCheckoutOf, matchWorkspace, memoryOfPath, repoOfSlug, slugOf, writtenPath } from './detect.ts'
 
 const ws = (id: string, name: string, path: string, branch: string | null) => ({ id, name, path, branch })
 
@@ -45,4 +46,10 @@ test('recognises a memory an agent wrote, never the index nor another file', () 
   assert.equal(memoryOfPath('/repo/memory/x.md', root), null)
   assert.equal(writtenPath('Edit', { file_path: '/a.md' }), '/a.md')
   assert.equal(writtenPath('Read', { file_path: '/a.md' }), null)
+})
+
+test('the Claude command line keeps the prompt intact through a shell', () => {
+  const prompt = "Corrige `src/a.ts` (l'index), \$HOME et \"guillemets\" ; rien d'autre."
+  const echoed = execFileSync('sh', ['-c', claudeCommand(prompt).replace(/^claude /, 'printf %s ')], { encoding: 'utf8' })
+  assert.equal(echoed, prompt)
 })
