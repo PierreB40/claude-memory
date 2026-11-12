@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "claude-memory",
   "name": "Claude Memory",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "What Claude Code remembers about the project in front of you, and what no longer holds: memories citing deleted code, broken links, entries Claude cannot see. Read any memory in place; hand the fixes to a new Claude.",
   "author": {
     "name": "Pierre Blanchard",

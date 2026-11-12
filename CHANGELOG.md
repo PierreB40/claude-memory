@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - WSL on Windows: a workspace in a WSL distribution finds its Claude's memory in the Linux home,
   read through the `\\wsl.localhost` share, with its folder named after the Linux path as Claude

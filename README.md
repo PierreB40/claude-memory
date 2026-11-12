@@ -23,10 +23,10 @@ workspaces on macOS, Linux, Windows or WSL (not SSH: see [Limits](#limits)).
 In Orca, open **Settings → Plugins → Add plugin → From Git URL** and enter:
 
 ```text
-https://github.com/PierreB40/claude-memory#v0.4.0
+https://github.com/PierreB40/claude-memory#v0.4.1
 ```
 
-or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.0`.
+or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.1`.
 
 Then open the **Claude Memory** panel in the right sidebar, or click the book in the status bar.
 
@@ -37,7 +37,8 @@ Then open the **Claude Memory** panel in the right sidebar, or click the book in
 ## What it does
 
 **A panel that follows the focused workspace**, like Orca's own tabs: switch workspace and it
-switches project. A fixed header (project, branch, *Verify*, tabs, search, type filter) sits
+switches project. When two workspaces share a name and a branch, it tells them apart by the folder
+their terminals show, or asks you once (see [Limits](#limits)). A fixed header (project, branch, *Verify*, tabs, search, type filter) sits
 over grouped lists:
 
 - **To verify**: the memories that are maybe no longer true. That covers cited files found neither
