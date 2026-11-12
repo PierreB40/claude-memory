@@ -8,8 +8,8 @@ export interface ProjectView extends Audit {
   slug: string
   /** Short name: the repository folder when known, else the slug's last segment. */
   label: string
-  /** The focused workspace this project was detected from; null when chosen by hand. */
-  detectedFrom: string | null
+  /** The focused workspace this project was detected from. */
+  detectedFrom: string
   /** What cited paths were checked against: a checkout on a branch; null when none matched. */
   checked: { path: string; branch: string | null } | null
   /** The default branch the checked one is compared with, when they differ. */
@@ -24,12 +24,12 @@ declare module 'orca' {
   interface PluginRequests {
     /** Claude Code projects that have at least one memory, most memories first. */
     'memory.projects': { output: { projects: ProjectSummary[] } }
-    /** The focused workspace's project (or `slug` when given), audited. Null: no memory anywhere. */
-    'memory.view': { input: { slug?: string }; output: ProjectView | null }
+    /** The focused workspace and its project, audited; project null when it has no memory. */
+    'memory.view': { output: { project: ProjectView | null; workspace: string | null } }
     /** One memory's text, without its header. */
     'memory.read': { input: { slug: string; file: string }; output: { body: string } }
     /** Starts a new Claude in a terminal of the project's workspace, the memories to verify (or those the branch broke) as its first message. */
-    'memory.verify': { input: { slug: string; scope: VerifyScope }; output: { count: number; workspace: string } }
+    'memory.verify': { input: { scope: VerifyScope }; output: { count: number; workspace: string } }
     /** The person saw what Claude learned: clears the « new » marks and the status bar count. */
     'memory.seen': { input: { slug: string }; output: { ok: true } }
   }

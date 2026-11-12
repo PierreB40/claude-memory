@@ -38,17 +38,22 @@ async function unseenOf(orca: OrcaWorkerApi, slug: string): Promise<string[]> {
 const lastSegment = (path: string): string => path.split('/').filter(Boolean).pop() ?? path
 const shortRef = (ref: string): string => ref.replace(/^origin\//, '')
 
-async function view(orca: OrcaWorkerApi, wanted?: string): Promise<ProjectView | null> {
+/**
+ * The project of the focused workspace, like every other Orca sidebar tab: no workspace or no
+ * memory for it gives null, never another project.
+ */
+async function view(orca: OrcaWorkerApi): Promise<ProjectView | null> {
   const root = await rootOf(orca)
   const projects = await listProjects(root)
   if (projects.length === 0) return null
   const known = new Set(projects.map((p) => p.slug))
   const { all, focused } = await workspaces(orca)
   const detected = focused ? (candidateSlugs(focused.path, focused.gitFile).find((s) => known.has(s)) ?? null) : null
-  const slug = wanted && known.has(wanted) ? wanted : (detected ?? projects[0]?.slug ?? '')
+  if (!detected || !focused) return null
+  const slug = detected
 
   // The focused workspace's own checkout when it is this project: its branch is what is true here.
-  const checkout = slug === detected && focused ? focused.path : repoOfSlug(slug, all)
+  const checkout: string | null = focused.path
   const repoFiles = checkout ? await trackedFiles(checkout) : null
   const branch = checkout && repoFiles ? await currentBranch(checkout) : null
   const base = checkout && repoFiles ? await baseRef(checkout) : null
@@ -61,7 +66,7 @@ async function view(orca: OrcaWorkerApi, wanted?: string): Promise<ProjectView |
     ...result,
     slug,
     label: checkout ? lastSegment(repoOfSlug(slug, all) ?? checkout) : lastSegment(slug.replace(/-/g, '/')),
-    detectedFrom: slug === detected && focused ? focused.name : null,
+    detectedFrom: focused.name,
     checked: checkout && repoFiles ? { path: checkout, branch } : null,
     base: baseFiles ? compare : null,
     unseen: (await unseenOf(orca, slug)).filter((f) => present.has(f))
@@ -99,9 +104,9 @@ async function refreshStatus(orca: OrcaWorkerApi): Promise<void> {
  * Always a NEW Claude, in its own terminal: typing into an existing one could land in a
  * conversation the person is having, and an idle-looking agent is not a free one.
  */
-async function handOver(orca: OrcaWorkerApi, slug: string, scope: VerifyScope): Promise<{ count: number; workspace: string }> {
-  const current = await view(orca, slug)
-  if (!current) throw new Error('Aucune mémoire.')
+async function handOver(orca: OrcaWorkerApi, scope: VerifyScope): Promise<{ count: number; workspace: string }> {
+  const current = await view(orca)
+  if (!current) throw new Error('Ce workspace n’a aucune mémoire Claude.')
   const dir = memoryDir(current.slug, await rootOf(orca))
   let prompt: string
   let count: number
@@ -126,9 +131,12 @@ async function handOver(orca: OrcaWorkerApi, slug: string, scope: VerifyScope): 
 
 export default function activate(orca: OrcaWorkerApi): void {
   orca.panels.handle('memory.projects', async () => ({ projects: await listProjects(await rootOf(orca)) }))
-  orca.panels.handle('memory.view', async ({ slug }) => view(orca, slug))
+  orca.panels.handle('memory.view', async () => {
+    const { focused } = await workspaces(orca)
+    return { project: await view(orca), workspace: focused?.name ?? null }
+  })
   orca.panels.handle('memory.read', async ({ slug, file }) => ({ body: bodyOf(await readMemory(slug, file, await rootOf(orca))) }))
-  orca.panels.handle('memory.verify', async ({ slug, scope }) => handOver(orca, slug, scope))
+  orca.panels.handle('memory.verify', async ({ scope }) => handOver(orca, scope))
   orca.panels.handle('memory.seen', async ({ slug }) => {
     await orca.storage.delete(unseenKey(slug))
     void refreshStatus(orca)
@@ -139,7 +147,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     const v = await view(orca)
     if (!v) return 'Claude n’a encore aucune mémoire.'
     const scope: VerifyScope = v.memories.some((m) => m.brokenHere.length) ? 'branch' : 'all'
-    const { count, workspace } = await handOver(orca, v.slug, scope)
+    const { count, workspace } = await handOver(orca, scope)
     return `Claude lancé dans « ${workspace} » avec ${count} mémoire(s) à vérifier.`
   })
   orca.commands.register('show', async () => {
