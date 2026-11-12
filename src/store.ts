@@ -128,7 +128,7 @@ export async function readCheckout(checkout: string): Promise<CheckoutFacts | nu
   const files = [...new Set(nulSplit(present))].filter((f) => !gone.has(f))
   // A detached HEAD has no branch name: say so, with its commit, as Orca's sidebar does.
   const name = head?.trim() || null
-  const branch = name === 'HEAD' ? `HEAD détachée @ ${(await git(checkout, ['rev-parse', '--short', 'HEAD']))?.trim() ?? '?'}` : name
+  const branch = name === 'HEAD' ? `HEAD @ ${(await git(checkout, ['rev-parse', '--short', 'HEAD']))?.trim() ?? '?'}` : name
   const ref = await baseRef(checkout)
   const base = ref && branch !== ref.replace(/^origin\//, '') ? ref : null
   if (!base) return { branch, base: null, files, baseFiles: [], removed: deletedNow }
@@ -147,6 +147,6 @@ export async function presentOnDisk(checkout: string, paths: readonly string[]):
 }
 
 export async function readMemory(slug: string, file: string, root = projectsRoot()): Promise<string> {
-  if (/[/\\]|\.\./.test(slug) || /[/\\]|\.\./.test(file) || !file.endsWith('.md')) throw new Error('Mémoire invalide.')
+  if (/[/\\]|\.\./.test(slug) || /[/\\]|\.\./.test(file) || !file.endsWith('.md')) throw new Error('Not a memory file of this folder.')
   return readFile(join(root, slug, 'memory', file), 'utf8')
 }

@@ -16,3 +16,4 @@ The first public release.
   message.
 - Notifications when Claude writes a memory, and the memory's health in the status bar.
 - `node src/cli.ts`, the same audit without Orca.
+- A listing icon, cover and screenshot for Orca's plugin directory.

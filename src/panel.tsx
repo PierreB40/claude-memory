@@ -61,7 +61,7 @@ const t = (): Words => words(langOf(env.locale))
 const locale = (): { locale: string } => ({ locale: env.locale })
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-/** Why a memory is to verify, in a few words: « 10/11 fichiers introuvables · lien cassé ». */
+/** Why a memory is to verify, in a few words: “10/11 files not found · broken link”. */
 function reason(m: Memory): string {
   const w = t()
   const parts: string[] = []

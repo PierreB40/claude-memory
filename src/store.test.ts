@@ -69,7 +69,7 @@ test('a detached HEAD is named with its commit', async () => {
   try {
     git('checkout', '-q', '--detach')
     const sha = git('rev-parse', '--short', 'HEAD').trim()
-    assert.equal((await readCheckout(dir))?.branch, `HEAD détachée @ ${sha}`)
+    assert.equal((await readCheckout(dir))?.branch, `HEAD @ ${sha}`)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
