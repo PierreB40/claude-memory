@@ -134,7 +134,7 @@ test('a memory opens in place: links both ways, file facts, read count; opening 
   const v = await pending
   await v.press({ type: 'ListItem', text: /Une mémoire/ })
   const tree = drawn(v)
-  assert.ok(tree.includes('Le texte de la mémoire.') && tree.includes('ce qu’elle ajoute'))
+  assert.ok(tree.includes('Le texte de la mémoire.') && tree.includes('Ce qu’elle ajoute'))
   assert.ok(tree.includes('Renvoie à · 1') && tree.includes('La cible'))
   assert.ok(tree.includes('Citée par · 1') && tree.includes('Une source'))
   assert.ok(tree.includes('3 fois'))

@@ -5,6 +5,6 @@ metadata:
   type: project
 ---
 
-Webhooks go through `apps/api/src/webhooks/stripe.ts`. Each event is recorded with its id before it is handled.
+Webhooks go through `apps/api/src/webhooks/stripe.ts`, signed with `STRIPE_WEBHOOK_SECRET`. Each event is recorded with its id before it is handled.
 
 Amounts follow [[prices-in-cents]]; releases follow [[deployment]].

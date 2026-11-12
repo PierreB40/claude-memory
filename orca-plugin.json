@@ -11,6 +11,18 @@
   "repository": "https://github.com/PierreB40/claude-memory",
   "license": "MIT",
   "homepage": "https://github.com/PierreB40/claude-memory",
+  "icon": "assets/icon.png",
+  "cover": {
+    "path": "assets/cover.png",
+    "alt": "The panel listing memories to verify: a deleted file in the index, a broken link, a cited file not found, one to update at merge."
+  },
+  "screenshots": [
+    {
+      "path": "assets/screenshot.png",
+      "alt": "The panel’s three tabs side by side: memories to verify, what Claude learned this week, and every memory grouped by type.",
+      "caption": "To verify, Recent and All, on a demo project"
+    }
+  ],
   "engines": {
     "orca": ">=1.4.248"
   },

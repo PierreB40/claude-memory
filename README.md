@@ -9,9 +9,10 @@ every session. Nobody rereads them. The code moves on, and a memory describing d
 steering the agent. This [Orca](https://github.com/stablyai/orca) plugin puts that memory beside
 your workspace, checks it against the code, and hands the fixes to a new Claude.
 
-![The Claude Memory panel in Orca, on a demo project](docs/images/panel.png)
+![The Claude Memory panel’s three tabs: to verify, recent, and all memories](assets/screenshot.png)
 
-*Captured from the real panel on the demo project in `fixtures/`. In English or French, as Orca is.
+*Captured from the real panel on a demo project and a throwaway git repository (the `showcase`
+scenarios of `src/panel.check.ts`). In English or French, as Orca is.
 An independent project, not made or endorsed by Anthropic or Stably.*
 
 ## Install
@@ -138,7 +139,8 @@ npm run typecheck
 | `src/worker.ts` | The worker: requests, the hook, the status bar, notifications |
 | `src/panel.tsx` | The panel, in Orca components |
 | `src/protocol.ts` | The typed contract between panel and worker |
-| `fixtures/projects/` | Demo memories used by the tests, the checks and the screenshot |
+| `fixtures/projects/` | Demo memories used by the tests, the checks and the screenshots |
+| `assets/` | Listing icon, cover and screenshot; `assets/src/` renders them (`npm run assets`) |
 
 CI validates the manifest with Orca's own validator and runs the CLI on the fixtures. The tests
 need Orca's test kit, so run `npm test` locally before a pull request.

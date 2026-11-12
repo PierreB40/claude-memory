@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="style.css">
+<style>
+  main { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 72px; height: 100%; padding: 0 110px; }
+  .brand { display: flex; align-items: center; gap: 16px; margin-bottom: 44px; }
+  .brand .mark { width: 52px; height: 52px; }
+  .brand span { font-size: 17px; font-weight: 600; letter-spacing: 0.18em; color: var(--muted); }
+  h1 { font-size: 92px; line-height: 1; font-weight: 750; letter-spacing: -0.03em; }
+  h1 em { font-style: normal; color: var(--accent); }
+  p.lead { margin-top: 28px; font-size: 31px; line-height: 1.35; color: #d5d6e6; max-width: 640px; }
+  ul { list-style: none; padding: 0; margin-top: 44px; display: grid; gap: 16px; }
+  li { display: flex; align-items: center; gap: 14px; font-size: 22px; color: #e3e4f0; }
+  li::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--amber); flex: none; }
+  .footnote { position: absolute; left: 110px; bottom: 56px; }
+</style>
+<main>
+  <section>
+    <div class="brand"><div class="mark"><img src="mark.svg"></div><span>CLAUDE MEMORY</span></div>
+    <h1>What Claude<br>remembers<em>.</em></h1>
+    <p class="lead">And what no longer holds. Claude Code’s memory of your project, checked against the code, beside your workspace.</p>
+    <ul>
+      <li>Cited files checked against git</li>
+      <li>Follows the focused workspace</li>
+      <li>Hands the fixes to a new Claude</li>
+    </ul>
+  </section>
+  <div class="card"><img src="../../docs/images/verify.png" width="400"></div>
+</main>
+<div class="footnote">Independent community plugin for Orca</div>

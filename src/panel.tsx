@@ -212,7 +212,7 @@ function groups(p: ProjectView, which: TabId): Group[] {
     key: type,
     label: w.type[type].many,
     memories: p.memories.filter((m) => m.type === type && keep(m)),
-    subtitle: (m: Memory) => m.rest || w.edited(m.mtimeMs)
+    subtitle: (m: Memory) => capitalize(m.rest) || w.edited(m.mtimeMs)
   }))
 }
 
@@ -373,7 +373,7 @@ function Detail({ p, m, body }: { p: ProjectView; m: Memory; body: string | null
   const outgoing = m.related.map((f) => byFile.get(f)).filter((x): x is Memory => x !== undefined)
   const incoming = p.memories.filter((x) => x.file !== m.file && x.related.includes(m.file))
   // The lead is what the description adds to the title; a bare « (…) » reads better whole.
-  const lead = m.rest.startsWith('(') ? (m.description ?? '') : m.rest
+  const lead = capitalize(m.rest.startsWith('(') ? (m.description ?? '') : m.rest)
   const reads = p.reads[m.file]
   return (
     <Box direction="column" height="100%">

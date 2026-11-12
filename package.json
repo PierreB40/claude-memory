@@ -16,6 +16,7 @@
     "validate": "orca plugin validate .",
     "typecheck": "npx -y -p typescript@5.9.3 tsc --noEmit -p .",
     "audit": "node src/cli.ts",
-    "dev": "orca plugin dev watch . --check"
+    "dev": "orca plugin dev watch . --check",
+    "assets": "npm i --no-save --no-package-lock playwright@1.62.1 && node scripts/render-assets.mjs"
   }
 }
