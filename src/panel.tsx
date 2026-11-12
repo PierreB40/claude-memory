@@ -1,29 +1,31 @@
 // What Claude Code believes about the focused project, and what no longer holds.
-// One column, most useful first: to verify, learned recently, everything (searchable).
-// A memory opens in place. No build step: Orca compiles this file when the panel loads.
+// Two levels: a health block that answers "is my memory sound?" and carries the one action,
+// then tabs to explore. A memory opens in place. No build step: Orca compiles this file.
 import {
   atom,
   Button,
   Callout,
   Code,
-  Collapsible,
   derived,
   EmptyState,
   Heading,
   IconButton,
   Input,
+  KeyValue,
   List,
   ListItem,
   Markdown,
   on,
   plugin,
+  Progress,
   read,
   Row,
   Select,
-  Separator,
   set,
   Skeleton,
   Stack,
+  Tab,
+  Tabs,
   Text,
   update,
   type PanelContext
@@ -39,33 +41,35 @@ const failure = atom<string | null>(null)
 const chosen = atom('chosen', '', { persist: 'workspace' })
 const picking = atom(false)
 const query = atom('')
-const showAllToVerify = atom(false)
+/** The open tab, kept so that coming back from a memory lands where the person was. */
+const tab = atom<string | null>(null)
 const opened = atom<{ file: string; body: string | null } | null>(null)
 const verifying = atom(false)
-const verdict = atom<{ tone: 'success' | 'danger'; text: string } | null>(null)
+const sent = atom<{ ok: boolean; text: string } | null>(null)
 
 const RECENT_DAYS = 7
 const DAY = 86_400_000
-const TO_VERIFY_SHOWN = 5
 
-const TYPE_LABEL: Record<MemoryType, string> = {
-  feedback: 'Règles de travail',
-  project: 'Projet',
-  reference: 'Références',
-  user: 'Profil',
-  unknown: 'Sans type'
+const TYPE: Record<MemoryType, { one: string; many: string }> = {
+  feedback: { one: 'Règle de travail', many: 'Règles de travail' },
+  project: { one: 'Projet', many: 'Projet' },
+  reference: { one: 'Référence', many: 'Références' },
+  user: { one: 'Profil', many: 'Profil' },
+  unknown: { one: 'Sans type', many: 'Sans type' }
 }
-const TYPE_SINGULAR: Record<MemoryType, string> = {
-  feedback: 'règle de travail',
-  project: 'projet',
-  reference: 'référence',
-  user: 'profil',
-  unknown: 'sans type'
+const TYPE_ORDER: MemoryType[] = ['feedback', 'project', 'reference', 'user', 'unknown']
+/** A defect's short label, as it reads after a count on a list row. */
+const DEFECT: Record<string, string> = {
+  'Lien mort': 'lien cassé',
+  'Lien à rediriger': 'lien à rediriger',
+  'Hors index': 'absente de l’index',
+  'Nom en double': 'nom en double',
+  'Sans en-tête': 'sans en-tête'
 }
-const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
-const TYPE_ORDER: MemoryType[] =['feedback', 'project', 'reference', 'user', 'unknown']
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+const plural = (n: number, one: string, many: string): string => `${n} ${n > 1 ? many : one}`
 const rtf = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' })
 function ago(ms: number): string {
   const minutes = Math.round((ms - Date.now()) / 60_000)
@@ -74,20 +78,24 @@ function ago(ms: number): string {
   if (hours > -24) return rtf.format(hours, 'hour')
   return rtf.format(Math.round(hours / 24), 'day')
 }
-const tokens = (bytes: number): string => `≈ ${(bytes / 4 / 1000).toFixed(1).replace('.', ',')} k tokens`
+const tokens = (bytes: number): string => `≈ ${(bytes / 4 / 1000).toFixed(1).replace('.', ',')} k tokens/session`
 
-/** Why a memory is to verify, short enough for one list row. */
+/** Why a memory is to verify, short enough for one row: « 10 fichiers sur 11 introuvables ». */
 function reason(m: Memory): string {
   const parts: string[] = []
-  if (m.missingPaths.length) parts.push(`${m.missingPaths.length} fichier${m.missingPaths.length > 1 ? 's' : ''} cité${m.missingPaths.length > 1 ? 's' : ''} sur ${m.cited} introuvable${m.missingPaths.length > 1 ? 's' : ''}`)
-  for (const p of m.problems) if (!parts.includes(p.short)) parts.push(p.short)
-  return parts.join(' · ')
+  if (m.missingPaths.length) parts.push(`${plural(m.missingPaths.length, 'fichier', 'fichiers')} sur ${m.cited} introuvable${m.missingPaths.length > 1 ? 's' : ''}`)
+  for (const p of m.problems) {
+    const label = DEFECT[p.short] ?? p.short.toLowerCase()
+    if (!parts.some((x) => x.endsWith(label))) parts.push(`1 ${label}`)
+  }
+  return capitalize(parts.join(' · '))
 }
 
 const verifyList = derived(() => {
   const p = read(project)
   return p ? toVerify(p) : []
 })
+const suspect = derived(() => new Set(read(verifyList).map((m) => m.file)))
 
 async function load(): Promise<void> {
   set(failure, null)
@@ -102,11 +110,17 @@ async function load(): Promise<void> {
   }
 }
 
+function reset(): void {
+  set(opened, null)
+  set(sent, null)
+  set(tab, null)
+  set(query, '')
+}
+
 function choose(slug: string): void {
   set(chosen, slug)
   set(picking, false)
-  set(opened, null)
-  set(verdict, null)
+  reset()
   set(project, undefined)
   void load()
 }
@@ -127,18 +141,18 @@ async function verify(): Promise<void> {
   const p = read(project)
   if (!p) return
   set(verifying, true)
-  set(verdict, null)
+  set(sent, null)
   try {
     const answer = await plugin.request('memory.verify', { slug: p.slug }, { timeoutMs: 60_000 })
-    set(verdict, {
-      tone: 'success',
+    set(sent, {
+      ok: true,
       text:
         answer.via === 'terminal'
-          ? `Demande envoyée à Claude (${answer.count} à vérifier). Il proposera les suppressions sans les faire.`
-          : `Claude lancé dans un nouveau terminal (${answer.count} à vérifier).`
+          ? 'Envoyé à Claude. Il corrigera et proposera les suppressions sans les faire.'
+          : 'Claude lancé dans un nouveau terminal. Il corrigera et proposera les suppressions sans les faire.'
     })
   } catch (e) {
-    set(verdict, { tone: 'danger', text: message(e) })
+    set(sent, { ok: false, text: message(e) })
   } finally {
     set(verifying, false)
   }
@@ -156,34 +170,29 @@ export function setup(ctx: PanelContext): void {
       if (key === last) return
       last = key
       if (!first && !read(chosen)) {
-        set(opened, null)
-        set(verdict, null)
+        reset()
         void load()
       }
     })
   )
 }
 
-function MemoryRow({ m, description }: { m: Memory; description?: string }) {
-  return <ListItem title={m.title} description={description ?? m.description ?? m.file} onPress={() => void open(m.file)} />
-}
-
 function Header({ p }: { p: ProjectView }) {
   const list = read(projects)
-  const source = p.detectedFrom ? `Workspace « ${p.detectedFrom} »` : 'Choisi à la main'
+  const source = p.detectedFrom ? `Suit le workspace « ${p.detectedFrom} »` : 'Projet choisi à la main'
   return (
     <Stack gap="xs">
       <Row justify="between" align="center">
         <Heading level={2}>{p.label}</Heading>
         <Row gap="none">
           {list.length > 1 ? (
-            <IconButton icon="folder" label="Changer de projet" variant="ghost" size="sm" onPress={() => update(picking, (v) => !v)} />
+            <IconButton icon="folder" label="Changer de projet" tooltip={source} variant="ghost" size="sm" onPress={() => update(picking, (v) => !v)} />
           ) : null}
           <IconButton icon="refresh" label="Relire" variant="ghost" size="sm" onPress={load} />
         </Row>
       </Row>
       <Text muted size="xs">
-        {source} · {p.memories.length} mémoires · index {tokens(p.index.bytes)} à chaque session
+        {`${p.memories.length} mémoires · ${tokens(p.index.bytes)}`}
       </Text>
       {read(picking) ? (
         <Stack gap="xs">
@@ -204,97 +213,90 @@ function Header({ p }: { p: ProjectView }) {
   )
 }
 
-function ToVerify({ p }: { p: ProjectView }) {
-  const items = read(verifyList)
+function Health({ p }: { p: ProjectView }) {
+  const unsafe = read(verifyList).length
+  const total = p.memories.length
   const busy = read(verifying)
-  const said = read(verdict)
-  if (items.length === 0 && p.indexProblems.length === 0) {
+  const said = read(sent)
+  if (unsafe === 0 && p.indexProblems.length === 0) {
     return (
-      <Callout tone="success" icon="check" title="Rien à vérifier">
-        <Text size="sm">{p.repo ? 'Chaque fichier cité existe et chaque lien mène quelque part.' : 'Chaque lien mène quelque part. Code non vérifié : aucun workspace Orca ne correspond à ce projet.'}</Text>
+      <Callout tone="success" icon="check" title="Mémoire saine">
+        <Text size="sm">
+          {p.repo ? 'Chaque fichier cité existe, chaque lien mène quelque part.' : 'Liens vérifiés, code non vérifié : aucun workspace ne correspond à ce projet.'}
+        </Text>
       </Callout>
     )
   }
-  const shown = read(showAllToVerify) ? items : items.slice(0, TO_VERIFY_SHOWN)
+  const title = unsafe > 0 ? `${plural(unsafe, 'mémoire n’est', 'mémoires ne sont')} plus sûre${unsafe > 1 ? 's' : ''}` : 'L’index de la mémoire est à corriger'
   return (
-    <Stack gap="sm">
-      <Stack gap="xs">
-        <Heading level={3}>À vérifier · {items.length + (p.indexProblems.length ? 1 : 0)}</Heading>
-        <Text muted size="xs">
-          Ces mémoires citent du code disparu ou sont mal reliées : Claude peut s'y fier à tort.
+    <Callout tone={said?.ok ? 'accent' : 'warning'} icon={said?.ok ? 'agent' : 'warning'} title={title}>
+      <Stack gap="sm">
+        <Text size="sm" tone={said && !said.ok ? 'danger' : undefined}>
+          {said ? said.text : p.repo ? 'Elles citent du code supprimé ou des liens cassés.' : 'Liens cassés ou index incomplet. Code non vérifié : aucun workspace ne correspond.'}
         </Text>
+        {total > 0 ? <Progress label={`Saines : ${total - unsafe} sur ${total}`} value={Math.round(((total - unsafe) / total) * 100)} /> : null}
+        {said?.ok ? null : (
+          <Button variant="solid" tone="accent" icon="agent" disabled={busy} onPress={verify}>
+            {busy ? 'Envoi à Claude…' : 'Faire vérifier par Claude'}
+          </Button>
+        )}
       </Stack>
+    </Callout>
+  )
+}
+
+function ToVerifyTab({ p }: { p: ProjectView }) {
+  const items = read(verifyList)
+  if (items.length === 0 && p.indexProblems.length === 0) return <EmptyState icon="check" title="Rien à vérifier" />
+  return (
+    <List label="Mémoires à vérifier">
       {p.indexProblems.map((text) => (
-        <Callout tone="danger" icon="error">
-          <Text size="sm">{text}</Text>
-        </Callout>
+        <ListItem icon="error" title="Index MEMORY.md" description={text} />
       ))}
-      {items.length ? (
-        <List label="Mémoires à vérifier">
-          {shown.map((m) => (
-            <MemoryRow m={m} description={reason(m)} />
-          ))}
-        </List>
-      ) : null}
-      {items.length > TO_VERIFY_SHOWN ? (
-        <Button variant="ghost" size="sm" icon={read(showAllToVerify) ? 'collapse' : 'expand'} onPress={() => update(showAllToVerify, (v) => !v)}>
-          {read(showAllToVerify) ? 'Réduire' : `Voir les ${items.length - TO_VERIFY_SHOWN} autres`}
-        </Button>
-      ) : null}
-      <Button variant="solid" tone="accent" icon="agent" disabled={busy} onPress={verify}>
-        {busy ? 'Envoi à Claude…' : 'Faire vérifier par Claude'}
-      </Button>
-      {said ? (
-        <Text size="xs" tone={said.tone}>
-          {said.text}
-        </Text>
-      ) : null}
-    </Stack>
+      {items.map((m) => (
+        <ListItem icon={m.missingPaths.length ? 'warning' : 'link'} title={m.title} description={reason(m)} onPress={() => void open(m.file)} />
+      ))}
+    </List>
   )
 }
 
-function Recent({ p }: { p: ProjectView }) {
-  const since = Date.now() - RECENT_DAYS * DAY
-  const recent = p.memories.filter((m) => m.mtimeMs >= since).sort((a, b) => b.mtimeMs - a.mtimeMs)
-  if (recent.length === 0) return null
+function RecentTab({ recent }: { recent: Memory[] }) {
+  const flagged = read(suspect)
+  if (recent.length === 0) return <EmptyState icon="calendar" title={`Rien appris ces ${RECENT_DAYS} derniers jours`} />
   return (
-    <Stack gap="sm">
-      <Stack gap="xs">
-        <Heading level={3}>Appris cette semaine · {recent.length}</Heading>
-        <Text muted size="xs">
-          Ce que Claude a retenu ou modifié de lui-même ces {RECENT_DAYS} derniers jours.
-        </Text>
-      </Stack>
-      <List label="Mémoires récentes">
-        {recent.map((m) => (
-          <MemoryRow m={m} description={`${capitalize(ago(m.mtimeMs))} · ${TYPE_SINGULAR[m.type]}`} />
-        ))}
-      </List>
-    </Stack>
+    <List label="Mémoires récentes">
+      {recent.map((m) => (
+        <ListItem
+          icon={flagged.has(m.file) ? 'warning' : undefined}
+          title={m.title}
+          description={`${capitalize(ago(m.mtimeMs))} · ${TYPE[m.type].one}`}
+          onPress={() => void open(m.file)}
+        />
+      ))}
+    </List>
   )
 }
 
-function Everything({ p }: { p: ProjectView }) {
+function AllTab({ p }: { p: ProjectView }) {
   const q = read(query).trim().toLowerCase()
+  const flagged = read(suspect)
   const match = (m: Memory): boolean => !q || `${m.title} ${m.name ?? ''} ${m.description ?? ''} ${m.file}`.toLowerCase().includes(q)
   const groups = TYPE_ORDER.map((type) => ({ type, items: p.memories.filter((m) => m.type === type && match(m)) })).filter((g) => g.items.length)
   return (
-    <Stack gap="sm">
-      <Heading level={3}>Toutes les mémoires</Heading>
-      <Input label="Rechercher" labelHidden type="search" placeholder="Rechercher un titre, un sujet…" value={read(query)} onChange={(v) => set(query, v)} />
+    <Stack gap="md">
+      <Input label="Chercher" labelHidden type="search" placeholder="Chercher un titre, un sujet…" value={read(query)} onChange={(v) => set(query, v)} />
       {groups.length === 0 ? (
-        <Text muted size="sm">
-          Aucune mémoire ne correspond.
-        </Text>
+        <EmptyState icon="search" title="Aucune mémoire ne correspond" />
       ) : (
         groups.map((g) => (
-          <Collapsible title={`${TYPE_LABEL[g.type]} · ${g.items.length}`} open={q ? true : undefined}>
-            <List label={TYPE_LABEL[g.type]}>
+          <Stack gap="xs">
+            <Heading level={3}>{`${TYPE[g.type].many} · ${g.items.length}`}</Heading>
+            <List label={TYPE[g.type].many}>
               {g.items.map((m) => (
-                <MemoryRow m={m} />
+                <ListItem icon={flagged.has(m.file) ? 'warning' : undefined} title={m.title} description={m.description ?? m.file} onPress={() => void open(m.file)} />
               ))}
             </List>
-          </Collapsible>
+          </Stack>
         ))
       )}
     </Stack>
@@ -309,22 +311,29 @@ function Detail({ p, file, body }: { p: ProjectView; file: string; body: string 
     <Stack gap="md">
       <Row>
         <Button variant="ghost" size="sm" onPress={() => set(opened, null)}>
-          ← {p.label}
+          ← Mémoires
         </Button>
       </Row>
-      <Stack gap="xs">
-        <Heading level={2}>{m.title}</Heading>
-        <Text muted size="xs">
-          {TYPE_LABEL[m.type]} · modifiée {ago(m.mtimeMs)} · <Code>{m.file}</Code>
-        </Text>
-      </Stack>
+      <Heading level={2}>{m.title}</Heading>
+      <KeyValue
+        items={[
+          { label: 'Type', value: TYPE[m.type].one },
+          { label: 'Modifiée', value: ago(m.mtimeMs) },
+          { label: 'Fichier', value: m.file, code: true }
+        ]}
+      />
       {m.missingPaths.length || m.problems.length ? (
         <Callout tone="warning" icon="warning" title="Peut-être plus vraie">
           <Stack gap="xs">
             {m.missingPaths.length ? (
-              <Text size="sm">
-                Introuvable{m.missingPaths.length > 1 ? 's' : ''} dans le dépôt : {m.missingPaths.join(', ')}
-              </Text>
+              <Stack gap="xs">
+                <Text size="sm">{`${plural(m.missingPaths.length, 'fichier cité introuvable', 'fichiers cités introuvables')} :`}</Text>
+                {m.missingPaths.map((path) => (
+                  <Text size="xs">
+                    <Code>{path}</Code>
+                  </Text>
+                ))}
+              </Stack>
             ) : null}
             {m.problems.map((x) => (
               <Text size="sm">{x.detail}</Text>
@@ -335,10 +344,10 @@ function Detail({ p, file, body }: { p: ProjectView; file: string; body: string 
       {body === null ? <Skeleton lines={8} label="Lecture de la mémoire" /> : <Markdown content={body} />}
       {related.length ? (
         <Stack gap="xs">
-          <Separator />
+          <Heading level={3}>Reliée à</Heading>
           <List label="Reliée à">
             {related.map((r) => (
-              <MemoryRow m={r} />
+              <ListItem title={r.title} description={TYPE[r.type].one} onPress={() => void open(r.file)} />
             ))}
           </List>
         </Stack>
@@ -359,16 +368,30 @@ export default function Panel() {
   }
   if (p === undefined) return <Skeleton lines={6} label="Lecture de la mémoire de Claude" />
   if (p === null) {
-    return <EmptyState icon="book" title="Claude n'a encore rien retenu" description="Aucun projet de ~/.claude/projects n'a de mémoire." />
+    return <EmptyState icon="book" title="Claude n’a encore rien retenu" description="Aucun projet de ~/.claude/projects n’a de mémoire." />
   }
   const o = read(opened)
   if (o) return <Detail p={p} file={o.file} body={o.body} />
+
+  const toCheck = read(verifyList).length + (p.indexProblems.length ? 1 : 0)
+  const since = Date.now() - RECENT_DAYS * DAY
+  const recent = p.memories.filter((m) => m.mtimeMs >= since).sort((a, b) => b.mtimeMs - a.mtimeMs)
+  const current = read(tab) ?? (toCheck > 0 ? 'verify' : 'recent')
   return (
     <Stack gap="lg">
       <Header p={p} />
-      <ToVerify p={p} />
-      <Recent p={p} />
-      <Everything p={p} />
+      <Health p={p} />
+      <Tabs label="Mémoires" value={current} onChange={(v) => set(tab, v)}>
+        <Tab value="verify" label={`À vérifier ${toCheck}`}>
+          <ToVerifyTab p={p} />
+        </Tab>
+        <Tab value="recent" label={`Récentes ${recent.length}`}>
+          <RecentTab recent={recent} />
+        </Tab>
+        <Tab value="all" label={`Toutes ${p.memories.length}`}>
+          <AllTab p={p} />
+        </Tab>
+      </Tabs>
     </Stack>
   )
 }
