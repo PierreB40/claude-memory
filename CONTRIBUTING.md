@@ -32,4 +32,5 @@ npm run typecheck
 
 Bump `version` in `orca-plugin.json` and `package.json`, add the `CHANGELOG.md` entry, merge, then
 tag the merge commit `vX.Y.Z` and push the tag. CI checks that the tag matches the manifest. The
-Orca plugin directory picks up the new tag on its own.
+Orca plugin directory picks up the new tag on its own. Then publish a GitHub release for the tag,
+with its `CHANGELOG.md` entry as notes.

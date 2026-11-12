@@ -51,10 +51,12 @@ jobs:
         working-directory: orca
         run: pnpm validate:plugin "$GITHUB_WORKSPACE/plugin"
 
-      - name: Tag matches the manifest version
+      - name: Tag matches the manifest and package versions
         if: startsWith(github.ref, 'refs/tags/')
         working-directory: plugin
-        run: test "v$(node -p "require('./orca-plugin.json').version")" = "$GITHUB_REF_NAME"
+        run: |
+          test "v$(node -p "require('./orca-plugin.json').version")" = "$GITHUB_REF_NAME"
+          test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
 
   audit:
     # The audit and git logic, through the CLI, on the fixtures: no Orca needed.
