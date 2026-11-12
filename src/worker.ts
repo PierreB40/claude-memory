@@ -2,7 +2,7 @@
 // keeps the status bar item current, hears Claude write a memory (agent.tool.after) and runs the
 // palette commands. It never writes a memory: fixing is handed to a Claude agent.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { audit, bodyOf, branchPrompt, DEFAULT_OPTIONS, toVerify, verifyPrompt } from './audit.ts'
+import { audit, bodyOf, branchPrompt, DEFAULT_OPTIONS, readableBody, toVerify, verifyPrompt } from './audit.ts'
 import { candidateSlugs, claudeCommand, matchWorkspace, memoryOfPath, repoOfSlug, workspaceFor, writtenPath, type WorkspaceInfo } from './detect.ts'
 import type { ProjectView, VerifyScope } from './protocol.ts'
 import { baseRef, currentBranch, filesAt, listProjects, memoryDir, projectsRoot, readGitFile, readMemory, readMemoryFolder, trackedFiles } from './store.ts'
@@ -135,7 +135,11 @@ export default function activate(orca: OrcaWorkerApi): void {
     const { focused } = await workspaces(orca)
     return { project: await view(orca), workspace: focused?.name ?? null }
   })
-  orca.panels.handle('memory.read', async ({ slug, file }) => ({ body: bodyOf(await readMemory(slug, file, await rootOf(orca))) }))
+  orca.panels.handle('memory.read', async ({ slug, file }) => {
+    const root = await rootOf(orca)
+    const { memories } = audit(await readMemoryFolder(slug, root))
+    return { body: readableBody(bodyOf(await readMemory(slug, file, root)), memories) }
+  })
   orca.panels.handle('memory.verify', async ({ scope }) => handOver(orca, scope))
   orca.panels.handle('memory.seen', async ({ slug }) => {
     await orca.storage.delete(unseenKey(slug))

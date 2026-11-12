@@ -1,7 +1,7 @@
 // What Claude Code believes about the focused workspace's project, and what no longer holds.
-// Like Orca's own sidebar tabs it follows the focused workspace. A fixed header (project, actions,
-// tabs, search, sort and filter) over one scrolling list; a memory opens in place, with what it
-// points to and what points to it. No build step: Orca compiles this file when the panel loads.
+// Like Orca's own sidebar tabs it follows the focused workspace. A fixed header (project, action,
+// tabs, search, type) over grouped lists that scroll; a memory opens in place: its defects, its
+// text, its links, then its file facts. No build step: Orca compiles this file when it loads.
 import {
   atom,
   Badge,
@@ -10,8 +10,10 @@ import {
   Callout,
   Code,
   EmptyState,
+  Heading,
   IconButton,
   Input,
+  KeyValue,
   List,
   ListItem,
   Markdown,
@@ -20,6 +22,7 @@ import {
   read,
   Row,
   Select,
+  Separator,
   set,
   Skeleton,
   Stack,
@@ -27,20 +30,20 @@ import {
   Tabs,
   Text,
   type IconName,
+  type OrcaNode,
   type PanelContext
 } from 'orca'
-import { toVerify, type Memory, type MemoryType } from './audit.ts'
+import { readableBody, toVerify, type Memory, type MemoryType } from './audit.ts'
 import type { ProjectView, VerifyScope } from './protocol.ts'
 
 type State = { status: 'loading' } | { status: 'failed'; error: string } | { status: 'ready'; project: ProjectView | null; workspace: string | null }
 type TabId = 'verify' | 'recent' | 'all'
-type Sort = 'severity' | 'recent' | 'title'
 
 const state = atom<State>({ status: 'loading' })
-/** The tab and the list settings are the person's habits: kept across runs of the plugin. */
+/** The tab and the type are the person's habits: kept across runs of the plugin. */
 const tab = atom<TabId | null>('tab', null, { persist: 'plugin' })
-const sortBy = atom<Sort | null>('sort', null, { persist: 'plugin' })
 const typeFilter = atom<MemoryType | 'any'>('type', 'any', { persist: 'plugin' })
+/** Kept while a memory is open, so coming back finds the list as it was left. */
 const query = atom('')
 const opened = atom<{ file: string; body: string | null } | null>(null)
 const busy = atom(false)
@@ -57,12 +60,6 @@ const TYPE_LABEL: Record<MemoryType, { one: string; many: string }> = {
   unknown: { one: 'Sans type', many: 'Sans type' }
 }
 const TYPE_ORDER: MemoryType[] = ['feedback', 'project', 'reference', 'user', 'unknown']
-const SORTS: { value: Sort; label: string }[] = [
-  { value: 'severity', label: 'Les plus fausses' },
-  { value: 'recent', label: 'Les plus récentes' },
-  { value: 'title', label: 'Titre A → Z' }
-]
-const DEFAULT_SORT: Record<TabId, Sort> = { verify: 'severity', recent: 'recent', all: 'title' }
 const DEFECT: Record<string, string> = {
   'Lien mort': 'lien cassé',
   'Lien à rediriger': 'lien à rediriger',
@@ -72,6 +69,7 @@ const DEFECT: Record<string, string> = {
 }
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
 const rtf = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' })
 function ago(ms: number): string {
   const minutes = Math.round((ms - Date.now()) / 60_000)
@@ -91,14 +89,13 @@ function reason(m: Memory): string {
     const label = DEFECT[p.short] ?? p.short.toLowerCase()
     if (!parts.includes(label)) parts.push(label)
   }
-  const text = parts.join(' · ')
-  return text.charAt(0).toUpperCase() + text.slice(1)
+  return capitalize(parts.join(' · '))
 }
 
-const iconOf = (m: Memory, fresh: boolean): IconName =>
-  fresh ? 'star' : m.brokenHere.length ? 'branch' : m.missingPaths.length ? 'warning' : m.problems.length ? 'link' : 'file-text'
+/** On the list to verify only, the icon says the cause; elsewhere the section already says it. */
+const causeIcon = (m: Memory): IconName => (m.brokenHere.length ? 'branch' : m.missingPaths.length ? 'warning' : 'link')
 
-/** How wrong a memory is, for the « most wrong first » sort: what the branch broke weighs most. */
+/** How wrong a memory is: what the branch broke weighs most, then the share of vanished code. */
 const severity = (m: Memory): number =>
   m.brokenHere.length * 100 + (m.cited ? (m.missingPaths.length * m.missingPaths.length) / m.cited : 0) + m.problems.length
 
@@ -135,11 +132,13 @@ async function verify(scope: VerifyScope): Promise<void> {
   }
 }
 
-/** Opening the recent tab is seeing what Claude learned: the « new » marks and the count go. */
+/** Leaving the recent tab after seeing it is having seen what Claude learned. */
 function showTab(next: string): void {
-  set(tab, next as TabId)
   const s = read(state)
-  if (next === 'recent' && s.status === 'ready' && s.project?.unseen.length) void plugin.request('memory.seen', { slug: s.project.slug })
+  if (read(tab) === 'recent' && next !== 'recent' && s.status === 'ready' && s.project?.unseen.length) {
+    void plugin.request('memory.seen', { slug: s.project.slug })
+  }
+  set(tab, next as TabId)
 }
 
 export function setup(ctx: PanelContext): void {
@@ -167,48 +166,89 @@ export function setup(ctx: PanelContext): void {
   )
 }
 
-/** The memories of a tab, searched, filtered by type and sorted, as one list. */
-function rows(p: ProjectView, which: TabId): Memory[] {
-  const q = read(query).trim().toLowerCase()
-  const type = read(typeFilter)
-  const since = Date.now() - RECENT_DAYS * DAY
-  const base = which === 'verify' ? toVerify(p) : which === 'recent' ? p.memories.filter((m) => m.mtimeMs >= since) : p.memories
-  const sort = read(sortBy) ?? DEFAULT_SORT[which]
-  return base
-    .filter((m) => type === 'any' || m.type === type)
-    .filter((m) => !q || `${m.title} ${m.name ?? ''} ${m.description ?? ''} ${m.file}`.toLowerCase().includes(q))
-    .sort((a, b) => (sort === 'severity' ? severity(b) - severity(a) : sort === 'recent' ? b.mtimeMs - a.mtimeMs : a.title.localeCompare(b.title, 'fr')))
+interface Group {
+  key: string
+  label: string
+  icons: boolean
+  memories: Memory[]
+  subtitle: (m: Memory) => string
 }
 
-function MemoryList({ p, which, items }: { p: ProjectView; which: TabId; items: Memory[] }) {
-  const fresh = new Set(p.unseen)
+/** A tab's memories, searched and filtered, in the groups the tab reads best in. */
+function groups(p: ProjectView, which: TabId): Group[] {
+  const q = read(query).trim().toLowerCase()
+  const type = read(typeFilter)
+  const keep = (m: Memory): boolean =>
+    (type === 'any' || m.type === type) && (!q || `${m.title} ${m.name ?? ''} ${m.description ?? ''} ${m.file}`.toLowerCase().includes(q))
+  const age = (m: Memory): string => `${capitalize(ago(m.mtimeMs))} · ${TYPE_LABEL[m.type].one.toLowerCase()}`
+  const byTitle = (a: Memory, b: Memory): number => a.title.localeCompare(b.title, 'fr')
+
+  if (which === 'verify') {
+    const all = toVerify(p).filter(keep).sort((a, b) => severity(b) - severity(a))
+    return [
+      { key: 'branch', label: 'Rendues fausses par ta branche', icons: true, memories: all.filter((m) => m.brokenHere.length), subtitle: reason },
+      { key: 'doubt', label: 'Peut-être plus vraies', icons: true, memories: all.filter((m) => !m.brokenHere.length), subtitle: reason }
+    ]
+  }
+  if (which === 'recent') {
+    const fresh = new Set(p.unseen)
+    const since = Date.now() - RECENT_DAYS * DAY
+    const recent = p.memories.filter((m) => m.mtimeMs >= since && keep(m)).sort((a, b) => b.mtimeMs - a.mtimeMs)
+    return [
+      { key: 'new', label: 'Nouvelles depuis ta dernière visite', icons: false, memories: recent.filter((m) => fresh.has(m.file)), subtitle: age },
+      { key: 'week', label: 'Plus tôt cette semaine', icons: false, memories: recent.filter((m) => !fresh.has(m.file)), subtitle: age }
+    ]
+  }
+  return TYPE_ORDER.map((t) => ({
+    key: t,
+    label: TYPE_LABEL[t].many,
+    icons: false,
+    memories: p.memories.filter((m) => m.type === t && keep(m)).sort(byTitle),
+    subtitle: (m: Memory) => m.rest || `Modifiée ${ago(m.mtimeMs)}`
+  }))
+}
+
+/** A group of rows under a discreet title, as Orca titles its own sidebar sections. */
+function Section({ label, children }: { label: string; children?: OrcaNode }) {
+  return (
+    <Stack gap="xs">
+      <Heading level={3}>{label}</Heading>
+      {children}
+    </Stack>
+  )
+}
+
+function Lists({ p, which }: { p: ProjectView; which: TabId }) {
+  const visible = groups(p, which).filter((g) => g.memories.length)
   const filtered = read(query).trim() !== '' || read(typeFilter) !== 'any'
-  if (items.length === 0) {
-    if (filtered) return <EmptyState icon="search" title="Aucune mémoire ne correspond" description="Change la recherche ou le type." />
+  const index = which === 'verify' && !filtered ? p.indexProblems : []
+  if (visible.length === 0 && index.length === 0) {
+    if (filtered) return <EmptyState icon="search" title="Aucune mémoire ne correspond" description="Modifie la recherche ou le type." />
     if (which === 'verify') return <EmptyState icon="check" title="Rien à vérifier" description="Chaque fichier cité existe, chaque lien mène quelque part." />
     if (which === 'recent') return <EmptyState icon="calendar" title={`Rien appris ces ${RECENT_DAYS} derniers jours`} />
     return <EmptyState icon="book" title="Aucune mémoire" />
   }
   return (
-    <List label="Mémoires">
-      {which === 'verify' && read(query).trim() === '' && read(typeFilter) === 'any'
-        ? p.indexProblems.map((text) => <ListItem icon="error" title="MEMORY.md" description={text} />)
-        : null}
-      {items.map((m) => (
-        <ListItem
-          icon={iconOf(m, fresh.has(m.file))}
-          title={m.title}
-          description={
-            which === 'verify'
-              ? reason(m)
-              : which === 'recent'
-                ? `${fresh.has(m.file) ? 'Nouveau · ' : ''}${ago(m.mtimeMs)} · ${TYPE_LABEL[m.type].one.toLowerCase()}`
-                : (m.description ?? m.file)
-          }
-          onPress={() => void open(m.file)}
-        />
+    <Stack gap="md">
+      {index.length ? (
+        <Section label="Index">
+          <List label="Index">
+            {index.map((text) => (
+              <ListItem icon="error" title="MEMORY.md" description={text} />
+            ))}
+          </List>
+        </Section>
+      ) : null}
+      {visible.map((g) => (
+        <Section label={`${g.label} · ${g.memories.length}`}>
+          <List label={g.label}>
+            {g.memories.map((m) => (
+              <ListItem icon={g.icons ? causeIcon(m) : undefined} title={m.title} description={g.subtitle(m)} onPress={() => void open(m.file)} />
+            ))}
+          </List>
+        </Section>
       ))}
-    </List>
+    </Stack>
   )
 }
 
@@ -257,65 +297,69 @@ function Header({ p }: { p: ProjectView }) {
   )
 }
 
-function Toolbar({ which }: { which: TabId }) {
-  return (
-    <Stack gap="xs">
-      <Input label="Rechercher" labelHidden type="search" placeholder="Rechercher un titre, un sujet…" value={read(query)} onChange={(v) => set(query, v)} />
-      <Row gap="xs">
-        <Box grow>
-          <Select label="Trier" labelHidden value={read(sortBy) ?? DEFAULT_SORT[which]} options={SORTS} onChange={(v) => set(sortBy, v as Sort)} />
-        </Box>
-        <Box grow>
-          <Select
-            label="Type"
-            labelHidden
-            value={read(typeFilter)}
-            options={[{ value: 'any', label: 'Tous les types' }, ...TYPE_ORDER.map((t) => ({ value: t, label: TYPE_LABEL[t].many }))]}
-            onChange={(v) => set(typeFilter, v as MemoryType | 'any')}
-          />
-        </Box>
-      </Row>
-    </Stack>
-  )
-}
-
 function Main({ p }: { p: ProjectView }) {
   const verifyCount = toVerify(p).length + (p.indexProblems.length ? 1 : 0)
   const since = Date.now() - RECENT_DAYS * DAY
   const recentCount = p.memories.filter((m) => m.mtimeMs >= since).length
   const which: TabId = read(tab) ?? (verifyCount ? 'verify' : 'recent')
-  const items = rows(p, which)
   return (
-    <Box direction="column" height="100%" gap="sm">
-      <Box direction="column" gap="sm" shrink={false}>
+    <Box direction="column" height="100%">
+      <Box direction="column" gap="sm" paddingY="xs" shrink={false}>
         <Header p={p} />
         <Tabs label="Vue" value={which} onChange={showTab}>
-          <Tab value="verify" label={`À vérifier ${verifyCount}`} icon="warning" />
-          <Tab value="recent" label={p.unseen.length ? `Récentes ${recentCount} · +${p.unseen.length}` : `Récentes ${recentCount}`} icon="calendar" />
-          <Tab value="all" label={`Toutes ${p.memories.length}`} icon="book" />
+          <Tab value="verify" label={`À vérifier ${verifyCount}`} />
+          <Tab value="recent" label={`Récentes ${recentCount}`} />
+          <Tab value="all" label={`Toutes ${p.memories.length}`} />
         </Tabs>
-        <Toolbar which={which} />
+        <Row gap="xs" align="center">
+          <Box grow>
+            <Input label="Rechercher" labelHidden type="search" placeholder="Rechercher dans les mémoires…" value={read(query)} onChange={(v) => set(query, v)} />
+          </Box>
+          <Box width="40%" shrink={false}>
+            <Select
+              label="Type"
+              labelHidden
+              value={read(typeFilter)}
+              options={[{ value: 'any', label: 'Tous les types' }, ...TYPE_ORDER.map((t) => ({ value: t, label: TYPE_LABEL[t].many }))]}
+              onChange={(v) => set(typeFilter, v as MemoryType | 'any')}
+            />
+          </Box>
+        </Row>
+        <Separator />
       </Box>
-      <Box direction="column" grow scroll="y" minHeight={0}>
-        <MemoryList p={p} which={which} items={items} />
+      <Box direction="column" grow scroll="y" minHeight={0} paddingY="sm">
+        <Lists p={p} which={which} />
       </Box>
     </Box>
   )
 }
 
-function Linked({ label, items }: { label: string; items: Memory[] }) {
-  if (items.length === 0) return null
+function Paths({ label, paths }: { label: string; paths: string[] }) {
+  if (paths.length === 0) return null
   return (
     <Stack gap="xs">
-      <Text size="xs" muted weight="medium">
-        {`${label} · ${items.length}`}
+      <Text size="xs" weight="medium">
+        {label}
       </Text>
+      {paths.map((x) => (
+        <Text size="xs">
+          <Code>{x}</Code>
+        </Text>
+      ))}
+    </Stack>
+  )
+}
+
+function Links({ label, items }: { label: string; items: Memory[] }) {
+  if (items.length === 0) return null
+  return (
+    <Section label={`${label} · ${items.length}`}>
       <List label={label}>
         {items.map((r) => (
-          <ListItem icon={iconOf(r, false)} title={r.title} description={`${TYPE_LABEL[r.type].one} · ${r.description ?? r.file}`} onPress={() => void open(r.file)} />
+          <ListItem title={r.title} description={`${TYPE_LABEL[r.type].one} · ${ago(r.mtimeMs)}`} onPress={() => void open(r.file)} />
         ))}
       </List>
-    </Stack>
+    </Section>
   )
 }
 
@@ -325,58 +369,58 @@ function Detail({ p, file, body }: { p: ProjectView; file: string; body: string 
   const byFile = new Map(p.memories.map((x) => [x.file, x]))
   const outgoing = m.related.map((f) => byFile.get(f)).filter((x): x is Memory => Boolean(x) && x?.file !== m.file)
   const incoming = p.memories.filter((x) => x.file !== m.file && x.related.includes(m.file))
-  const other = m.missingPaths.filter((x) => !m.brokenHere.includes(x))
+  const gone = m.missingPaths.filter((x) => !m.brokenHere.includes(x))
+  const defects = m.brokenHere.length + gone.length + m.problems.length
   return (
-    <Box direction="column" height="100%" gap="sm">
-      <Box direction="column" gap="xs" shrink={false}>
-        <Row gap="xs" align="center">
-          <IconButton icon="collapse" label="Retour aux mémoires" tooltip="Retour aux mémoires" variant="ghost" size="sm" onPress={() => set(opened, null)} />
-          <Text weight="semibold" truncate>
-            {m.title}
-          </Text>
+    <Box direction="column" height="100%">
+      <Box direction="column" gap="xs" paddingY="xs" shrink={false}>
+        <Row>
+          <Button variant="ghost" size="sm" onPress={() => set(opened, null)}>
+            ← Mémoires
+          </Button>
         </Row>
-        <Text size="xs" muted truncate>
-          {`${TYPE_LABEL[m.type].one} · modifiée ${ago(m.mtimeMs)} · ${m.file}`}
+        <Heading level={2}>{m.title}</Heading>
+        <Text size="xs" muted>
+          {`${TYPE_LABEL[m.type].one} · modifiée ${ago(m.mtimeMs)}`}
         </Text>
+        <Separator />
       </Box>
-      <Box direction="column" grow scroll="y" minHeight={0} gap="md">
-        {m.description ? (
-          <Text size="sm" muted>
-            {m.description}
-          </Text>
-        ) : null}
-        {m.brokenHere.length || other.length || m.problems.length ? (
-          <Callout tone={m.brokenHere.length ? 'danger' : 'warning'} icon={m.brokenHere.length ? 'branch' : 'warning'} title={m.brokenHere.length ? 'Ta branche la rend fausse' : 'Peut-être plus vraie'}>
-            <Stack gap="xs">
-              {m.brokenHere.length ? (
-                <Text size="xs" weight="medium">
-                  Retiré par ta branche
-                </Text>
+      <Box direction="column" grow scroll="y" minHeight={0} gap="md" paddingY="sm">
+        {defects ? (
+          <Callout tone={m.brokenHere.length ? 'danger' : 'warning'} icon={m.brokenHere.length ? 'branch' : 'warning'} title={m.brokenHere.length ? 'Ta branche la rend fausse' : 'À vérifier'}>
+            <Stack gap="sm">
+              <Paths label="Retiré par ta branche" paths={m.brokenHere} />
+              <Paths label="Introuvable dans le code" paths={gone} />
+              {m.problems.length ? (
+                <Stack gap="xs">
+                  <Text size="xs" weight="medium">
+                    Liens
+                  </Text>
+                  {m.problems.map((x) => (
+                    <Text size="xs">{readableBody(x.detail, p.memories).replace(/\*/g, '')}</Text>
+                  ))}
+                </Stack>
               ) : null}
-              {m.brokenHere.map((x) => (
-                <Text size="xs">
-                  <Code>{x}</Code>
-                </Text>
-              ))}
-              {other.length ? (
-                <Text size="xs" weight="medium">
-                  Introuvable dans le code
-                </Text>
-              ) : null}
-              {other.map((x) => (
-                <Text size="xs">
-                  <Code>{x}</Code>
-                </Text>
-              ))}
-              {m.problems.map((x) => (
-                <Text size="xs">{x.detail}</Text>
-              ))}
             </Stack>
           </Callout>
         ) : null}
-        <Linked label="Elle renvoie à" items={outgoing} />
-        <Linked label="Mentionnée par" items={incoming} />
+        {m.rest ? <Text size="sm">{m.rest}</Text> : null}
         {body === null ? <Skeleton lines={8} label="Lecture de la mémoire" /> : <Markdown content={body} />}
+        {outgoing.length || incoming.length ? (
+          <Box direction="column" background="muted" radius="md" padding="sm" gap="sm">
+            <Links label="Renvoie à" items={outgoing} />
+            <Links label="Citée par" items={incoming} />
+          </Box>
+        ) : null}
+        <Separator />
+        <KeyValue
+          items={[
+            { label: 'Fichier', value: m.file, code: true },
+            ...(m.name && m.name !== m.file.replace(/\.md$/, '') ? [{ label: 'Nom', value: m.name, code: true }] : []),
+            { label: 'Dans l’index', value: m.indexed ? 'Oui' : 'Non — Claude ne la voit pas', tone: m.indexed ? 'neutral' : 'warning' },
+            { label: 'Chemins cités', value: m.cited ? (m.missingPaths.length ? `${m.cited}, dont ${m.missingPaths.length} introuvable${m.missingPaths.length > 1 ? 's' : ''}` : `${m.cited}`) : 'Aucun' }
+          ]}
+        />
       </Box>
     </Box>
   )

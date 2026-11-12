@@ -14,6 +14,8 @@ export interface Memory {
   file: string
   /** What a person reads: the index text when it is a title, else the description's opening clause. */
   title: string
+  /** The description without what the title already says; empty when nothing is left. */
+  rest: string
   name: string | null
   description: string | null
   type: MemoryType
@@ -136,21 +138,30 @@ const readable = (slug: string): string =>
   capitalize(slug.replace(/\.md$/, '').replace(/^(project|feedback|reference|user)[-_]/, '').replace(/[-_]+/g, ' ').trim())
 
 /**
- * The opening clause of a description, which Claude writes for a person: cut at the first
- * dash, colon, parenthesis or semicolon, without a leading status emoji.
+ * A description cut in two: its opening clause (cut at the first dash, colon, parenthesis or
+ * semicolon, without a leading status emoji), which Claude writes for a person, and the rest.
  */
-export function headline(description: string): string {
-  const clause = description.replace(/^[\p{Extended_Pictographic}️\s]+/u, '').split(/\s[—–-]\s|\s?:\s|\s\(|;\s/)[0]?.trim() ?? ''
-  return clause.length > 70 ? `${clause.slice(0, 69).trimEnd()}…` : capitalize(clause)
+export function splitDescription(description: string): { lead: string; rest: string } {
+  const text = description.replace(/^[\p{Extended_Pictographic}\uFE0F\s]+/u, '').trim()
+  const cut = /\s[—–-]\s|\s?:\s|\s\(|;\s/.exec(text)
+  const clause = (cut ? text.slice(0, cut.index) : text).trim()
+  // Too long for a title: cut it, and let the rest pick up where the title stopped.
+  if (clause.length > 70) return { lead: `${clause.slice(0, 69).trimEnd()}…`, rest: `…${text.slice(69).trimStart()}` }
+  const after = cut ? text.slice(cut.index + cut[0].length).trim() : ''
+  // A cut on « ( » keeps its parenthesis: « (12/11) » reads, « 12/11) » does not.
+  return { lead: capitalize(clause), rest: cut?.[0].trim() === '(' ? `(${after}` : after }
 }
+
+export const headline = (description: string): string => splitDescription(description).lead
 
 /** An index text with no space is a slug someone pasted, not a title. */
 const isTitle = (text: string | undefined): text is string => Boolean(text && /\s/.test(text))
 
-function titleOf(linkText: string | undefined, description: string | null, name: string | null, slug: string): string {
-  if (isTitle(linkText)) return linkText
-  const lead = description ? headline(description) : ''
-  return lead.length >= 8 ? lead : readable(name ?? slug)
+/** The title a person reads, and what of the description is left to say under it. */
+function titleOf(linkText: string | undefined, description: string | null, name: string | null, slug: string): { title: string; rest: string } {
+  if (isTitle(linkText)) return { title: linkText, rest: description ?? '' }
+  const split = description ? splitDescription(description) : { lead: '', rest: '' }
+  return split.lead.length >= 8 ? { title: split.lead, rest: split.rest } : { title: readable(name ?? slug), rest: description ?? '' }
 }
 
 export function audit(files: readonly MemoryFile[], options: AuditOptions = DEFAULT_OPTIONS): Audit {
@@ -196,7 +207,7 @@ export function audit(files: readonly MemoryFile[], options: AuditOptions = DEFA
       const slug = f.file.replace(/\.md$/, '')
       return {
         file: f.file,
-        title: titleOf(linkText, fm?.description || null, name, slug),
+        ...titleOf(linkText, fm?.description || null, name, slug),
         name,
         description: fm?.description || null,
         type: memoryType(fm),
@@ -258,4 +269,20 @@ export function branchPrompt(dir: string, branch: string, memories: readonly Mem
     `La branche ${branch} supprime ou déplace des fichiers que ta mémoire automatique cite (${dir}) : ${items.join(' · ')}.`,
     "Mets ces mémoires à jour pour qu'elles décrivent l'état de la branche (nouveau chemin si le fichier a été déplacé, ce qui le remplace s'il a été retiré) ; si l'une n'a plus de raison d'être, propose-moi de la supprimer plutôt que de le faire."
   ].join(' ')
+}
+
+/**
+ * A memory's text as a person reads it: each `[[slug]]` becomes the title of the memory it
+* names, in « » and italics; a slug that names none says so (it is a defect to see).
+ */
+export function readableBody(body: string, memories: readonly Pick<Memory, 'file' | 'name' | 'title'>[]): string {
+  const byKey = new Map<string, string>()
+  for (const m of memories) {
+    byKey.set(m.file.replace(/\.md$/, ''), m.title)
+    if (m.name) byKey.set(m.name, m.title)
+  }
+  return body.replace(/\[\[([^\]\s|]+)\]\]/g, (whole, slug: string) => {
+    const title = byKey.get(slug)
+    return title ? `*« ${title} »*` : `*${slug} (introuvable)*`
+  })
 }

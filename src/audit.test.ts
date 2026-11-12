@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, missingFrom, parseFrontmatter, toVerify, verifyPrompt, type MemoryFile } from './audit.ts'
+import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, missingFrom, parseFrontmatter, readableBody, splitDescription, toVerify, verifyPrompt, type MemoryFile } from './audit.ts'
 
 const md = (name: string, type: string, body = ''): string => `---\nname: ${name}\ndescription: d\nmetadata:\n  type: ${type}\n---\n\n${body}\n`
 const file = (f: string, content: string): MemoryFile => ({ file: f, content, mtimeMs: 0 })
@@ -83,4 +83,22 @@ test('the verify prompt is one line, and asks to propose deletions rather than m
   assert.ok(prompt.includes('a.md (Le lien [[x]] ne mène à aucune mémoire. ; cite `src/gone.ts`, introuvable(s) dans le dépôt)'))
   assert.ok(prompt.includes('Index : Index trop long.'))
   assert.ok(prompt.includes('propose-moi la liste de celles à supprimer'))
+})
+
+test('links in a memory read as the titles they name; a dead one stays visible', () => {
+  const memories = [{ file: 'a_file.md', name: 'a', title: 'La règle A' }]
+  assert.equal(readableBody('Voir [[a]], [[a_file]] et [[mort]].', memories), 'Voir *« La règle A »*, *« La règle A »* et *mort (introuvable)*.')
+})
+
+test('a description splits into the title and what is left to say, without repeating it', () => {
+  assert.deepEqual(splitDescription('⚠️ copie de la base : --clean échoue si la cible est en avance'), { lead: 'Copie de la base', rest: '--clean échoue si la cible est en avance' })
+  assert.deepEqual(splitDescription('Version 2.0 = nettoyage (12/11, une PR par sujet)'), { lead: 'Version 2.0 = nettoyage', rest: '(12/11, une PR par sujet)' })
+  assert.deepEqual(splitDescription('Une seule phrase'), { lead: 'Une seule phrase', rest: '' })
+})
+
+test('a title cut for length leaves the rest to pick up where it stopped', () => {
+  const long = 'Pour une refonte d’écrans, maquette haute fidélité validée par Pierre AVANT le code, toujours'
+  const { lead, rest } = splitDescription(long)
+  assert.ok(lead.endsWith('…'))
+  assert.ok(rest.startsWith('…') && !rest.includes('Pour une refonte'))
 })

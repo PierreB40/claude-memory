@@ -10,6 +10,7 @@ const drawn = (view: { tree(): unknown; summary(): readonly string[] }): string 
 const memory = (over: Partial<Memory>): Memory => ({
   file: 'a.md',
   title: 'A',
+  rest: '',
   name: 'a',
   description: 'desc',
   type: 'project',
@@ -58,22 +59,19 @@ test('a fixed header with tabs, search, sort and filter, then the list of what t
   assert.ok(tree.includes('"À vérifier" selected') || tree.includes('À vérifier 1" selected'))
   assert.ok(tree.includes('2 mémoires · feat/x'))
   assert.ok(tree.includes('10/11 fichiers introuvables'))
-  assert.ok(tree.includes('Les plus fausses'))
   assert.ok(tree.includes('Tous les types'))
   assert.ok(!tree.includes('"title":"Saine"'), 'a sound memory is not in the list to verify')
   assert.deepEqual(v.errors, [])
   await v.unmount()
 })
 
-test('search, type filter and sort shape the list', async () => {
+test('search and type filter shape the list, grouped by type', async () => {
   const a = memory({ file: 'a.md', title: 'Bêta', type: 'feedback', mtimeMs: Date.now() - 1000 })
   const b = memory({ file: 'b.md', title: 'Alpha', type: 'project', mtimeMs: Date.now() - 2000 })
   const v = await mountWith([{ project: project([a, b]), workspace: 'analyze' }])
   await v.select({ label: 'Vue' }, 'all')
   const titles = (): string[] => v.findAll({ type: 'ListItem' }).map((e) => (e as unknown as { props: { title: string } }).props.title)
-  assert.deepEqual(titles(), ['Alpha', 'Bêta'])
-  await v.select({ label: 'Trier' }, 'recent')
-  assert.deepEqual(titles(), ['Bêta', 'Alpha'])
+  assert.deepEqual(titles(), ['Bêta', 'Alpha'], 'rules of work come before project memories')
   await v.select({ label: 'Type' }, 'project')
   assert.deepEqual(titles(), ['Alpha'])
   await v.select({ label: 'Type' }, 'any')
@@ -92,8 +90,7 @@ test('what the branch broke says so, in the header and on the row', async () => 
 test('a sound memory opens on what is recent, marks what is new, and offers no action', async () => {
   const fresh = memory({ file: 'n.md', title: 'Règle neuve', type: 'feedback', mtimeMs: Date.now() - 60_000 })
   const tree = drawn(await mountWith([{ project: project([fresh], { unseen: ['n.md'] }), workspace: 'analyze' }]))
-  assert.ok(tree.includes('Récentes 1 · +1'))
-  assert.ok(tree.includes('Nouveau · '))
+  assert.ok(tree.includes('Nouvelles depuis ta dernière visite · 1'))
   assert.ok(!tree.includes('"Vérifier"'))
 })
 
@@ -120,9 +117,10 @@ test('a memory opens in place, says what it points to and what points to it, and
   await v.press({ type: 'ListItem', text: /Une mémoire/ })
   const tree = drawn(v)
   assert.ok(tree.includes('Le texte de la mémoire.'))
-  assert.ok(tree.includes('Elle renvoie à · 1') && tree.includes('La cible') && tree.includes('Ce que dit la cible'))
-  assert.ok(tree.includes('Mentionnée par · 1') && tree.includes('Une source'))
-  await v.press({ label: 'Retour aux mémoires' })
+  assert.ok(tree.includes('Renvoie à · 1') && tree.includes('La cible'))
+  assert.ok(tree.includes('Citée par · 1') && tree.includes('Une source'))
+  assert.ok(tree.includes('Dans l’index'))
+  await v.press({ type: 'Button', text: /Mémoires/ })
   assert.ok(drawn(v).includes('"label":"Rechercher"') || drawn(v).includes('Rechercher'))
   await v.unmount()
 })
