@@ -18,15 +18,15 @@ An independent project, not made or endorsed by Anthropic or Stably.*
 ## Install
 
 Requirements: Orca **1.4.248** or newer, [Claude Code](https://claude.com/claude-code), `git`, and
-local workspaces on macOS or Linux.
+local workspaces on macOS, Linux or Windows (not WSL or SSH: see [Limits](#limits)).
 
 In Orca, open **Settings → Plugins → Add plugin → From Git URL** and enter:
 
 ```text
-https://github.com/PierreB40/claude-memory#v0.3.0
+https://github.com/PierreB40/claude-memory#v0.4.0
 ```
 
-or from a terminal: `orca plugin install PierreB40/claude-memory@v0.3.0`.
+or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.0`.
 
 Then open the **Claude Memory** panel in the right sidebar, or click the book in the status bar.
 
@@ -105,8 +105,15 @@ Clicking it shows or hides the sidebar.
   `main`) are told apart only by their terminals. Orca tells a panel only the focused workspace's
   name, branch and terminals, so the panel knows which one it is once an agent has run in one of
   them. Until then, it says so instead of guessing.
-- **Local workspaces only.** On WSL or over SSH, the code and Claude's memory stay on that host.
-  The panel says so; Orca does not hook those agents yet either.
+- **Local workspaces only: not WSL, not SSH.** On a WSL distribution or an SSH host, the code and
+  Claude's memory (`~/.claude/projects` there) stay on that host, and the plugin reads only the
+  machine Orca runs on. For such a workspace:
+  - the panel says it is on another host, and the status bar stays hidden;
+  - *Verify* is not offered;
+  - Orca does not hook the agents running there yet, so their memory writes bring no notification
+    and their reads are not counted.
+
+  Claude Code run natively on Windows, in a local workspace, is supported.
 - **Verify on Windows.** On macOS and Linux, *Verify* passes the request on the command line
   (`claude '…'`). On Windows, where terminals are PowerShell or cmd, Orca launches Claude and sends
   the request once it is ready.
