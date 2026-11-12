@@ -24,6 +24,8 @@ export interface Memory {
   cited: number
   /** Cited paths no longer in the repository; empty when the repository was not checked. */
   missingPaths: string[]
+  /** Of those, the ones the default branch still has: the checked branch removed them. */
+  brokenHere: string[]
   /** Consistency defects: `short` for a list row, `detail` for the memory itself. */
   problems: Problem[]
   indexed: boolean
@@ -46,11 +48,13 @@ export interface Audit {
 export interface AuditOptions {
   /** Claude Code loads only the first lines of MEMORY.md; past this many, the rest is unseen. */
   indexMaxLines: number
-  /** Every tracked file of the project's repository, relative; null when unknown. */
+  /** Every file of the checked checkout, relative; null when unknown. */
   repoFiles: readonly string[] | null
+  /** Every file of the default branch, to tell what the checked branch broke; null to skip. */
+  baseFiles: readonly string[] | null
 }
 
-export const DEFAULT_OPTIONS: AuditOptions = { indexMaxLines: 200, repoFiles: null }
+export const DEFAULT_OPTIONS: AuditOptions = { indexMaxLines: 200, repoFiles: null, baseFiles: null }
 
 const INDEX = 'MEMORY.md'
 const encoder = new TextEncoder()
@@ -186,6 +190,8 @@ export function audit(files: readonly MemoryFile[], options: AuditOptions = DEFA
       }
       if (indexFile && !entries.has(f.file)) problems.push({ short: 'Hors index', detail: 'Absente de MEMORY.md : Claude ne la voit pas.' })
       const cited = citedPaths(f.content)
+      const missing = options.repoFiles ? missingFrom(cited, options.repoFiles) : []
+      const baseFiles = options.baseFiles
       const linkText = entries.get(f.file)
       const slug = f.file.replace(/\.md$/, '')
       return {
@@ -197,7 +203,8 @@ export function audit(files: readonly MemoryFile[], options: AuditOptions = DEFA
         mtimeMs: f.mtimeMs,
         related: [...new Set(related)],
         cited: cited.length,
-        missingPaths: options.repoFiles ? missingFrom(cited, options.repoFiles) : [],
+        missingPaths: missing,
+        brokenHere: baseFiles ? missing.filter((m) => missingFrom([m], baseFiles).length === 0) : [],
         problems,
         indexed: entries.has(f.file)
       }
@@ -241,5 +248,14 @@ export function verifyPrompt(dir: string, memories: readonly Memory[], indexProb
     `Ces mémoires sont peut-être fausses ou mal reliées : ${items.join(' · ')}.`,
     ...(indexProblems.length ? [`Index : ${indexProblems.join(' ; ')}.`] : []),
     "Pour chacune, vérifie dans le code actuel : corrige-la si elle reste utile (chemins, liens vers le name: de la cible, ligne dans MEMORY.md), et propose-moi la liste de celles à supprimer plutôt que de les supprimer toi-même."
+  ].join(' ')
+}
+
+/** One line. The branch is the cause, so the fix is to follow it, not to doubt the memory. */
+export function branchPrompt(dir: string, branch: string, memories: readonly Memory[]): string {
+  const items = memories.map((m) => `${m.file} (cite ${m.brokenHere.map((p) => `\`${p}\``).join(', ')})`)
+  return [
+    `La branche ${branch} supprime ou déplace des fichiers que ta mémoire automatique cite (${dir}) : ${items.join(' · ')}.`,
+    "Mets ces mémoires à jour pour qu'elles décrivent l'état de la branche (nouveau chemin si le fichier a été déplacé, ce qui le remplace s'il a été retiré) ; si l'une n'a plus de raison d'être, propose-moi de la supprimer plutôt que de le faire."
   ].join(' ')
 }

@@ -17,6 +17,7 @@ const memory = (over: Partial<Memory>): Memory => ({
   related: [],
   cited: 0,
   missingPaths: [],
+  brokenHere: [],
   problems: [],
   indexed: true,
   ...over
@@ -25,7 +26,9 @@ const memory = (over: Partial<Memory>): Memory => ({
 const view = (memories: Memory[]): ProjectView => ({
   slug: '-p',
   label: 'shop',
-  repo: '/r',
+  checked: { path: '/r', branch: 'feat/x' },
+  base: 'origin/main',
+  unseen: [],
   detectedFrom: 'analyze',
   memories,
   indexProblems: [],
@@ -80,5 +83,25 @@ test('opens a memory in place and comes back', async () => {
 test('says so when Claude has remembered nothing yet', async () => {
   const v = await mountWith(null)
   assert.ok(drawn(v).includes('Claude n’a encore rien retenu'))
+  await v.unmount()
+})
+
+test('puts what the branch broke first, with its own action', async () => {
+  const broken = memory({ file: 'b.md', title: 'Le module ops', cited: 3, missingPaths: ['src/a.ts', 'src/b.ts'], brokenHere: ['src/a.ts'] })
+  const v = await mountWith(view([broken, memory({ file: 'ok.md' })]))
+  const tree = drawn(v)
+  assert.ok(tree.includes('Ta branche rend 1 mémoire fausse'))
+  assert.ok(tree.includes('Les faire mettre à jour par Claude'))
+  assert.ok(tree.includes('Ta branche retire 1 fichier cité'))
+  assert.ok(!tree.includes('Faire vérifier par Claude'))
+  await v.unmount()
+})
+
+test('marks what Claude learned since the last visit', async () => {
+  const fresh = memory({ file: 'n.md', title: 'Règle neuve', type: 'feedback', mtimeMs: Date.now() - 60_000 })
+  const v = await mountWith({ ...view([fresh]), unseen: ['n.md'] })
+  const tree = drawn(v)
+  assert.ok(tree.includes('Récentes 1 · +1'))
+  assert.ok(tree.includes('Nouveau · '))
   await v.unmount()
 })

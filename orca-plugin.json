@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "claude-memory",
   "name": "Claude Memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "What Claude Code remembers about your project, and what no longer holds: memories citing deleted code, broken links, entries Claude cannot see. Read any memory in place; hand the fixes to Claude.",
   "engines": {
     "orca": ">=1.4.248"
@@ -28,6 +28,36 @@
         "type": "string",
         "default": ""
       }
+    ],
+    "commands": [
+      {
+        "id": "show",
+        "title": "Claude Memory : afficher le panneau"
+      },
+      {
+        "id": "verify",
+        "title": "Claude Memory : faire vérifier la mémoire par Claude",
+        "when": "workspace"
+      }
+    ],
+    "statusBarItems": [
+      {
+        "id": "health",
+        "icon": "book",
+        "text": " ",
+        "tooltip": "Mémoire de Claude",
+        "command": "show"
+      }
+    ],
+    "events": [
+      {
+        "on": "workspace.changed"
+      }
+    ],
+    "hooks": [
+      {
+        "event": "agent.tool.after"
+      }
     ]
   },
   "capabilities": [
@@ -35,7 +65,13 @@
       "kind": "settings:own"
     },
     {
+      "kind": "storage:own"
+    },
+    {
       "kind": "workspace:read"
+    },
+    {
+      "kind": "workspace:write"
     },
     {
       "kind": "agent:read"
@@ -45,6 +81,9 @@
     },
     {
       "kind": "agent:launch"
+    },
+    {
+      "kind": "notifications:show"
     }
   ]
 }

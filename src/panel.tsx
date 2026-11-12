@@ -31,7 +31,7 @@ import {
   type PanelContext
 } from 'orca'
 import { toVerify, type Memory, type MemoryType } from './audit.ts'
-import type { ProjectView } from './protocol.ts'
+import type { ProjectView, VerifyScope } from './protocol.ts'
 import type { ProjectSummary } from './store.ts'
 
 const project = atom<ProjectView | null | undefined>(undefined)
@@ -137,25 +137,30 @@ async function open(file: string): Promise<void> {
   }
 }
 
-async function verify(): Promise<void> {
+async function verify(scope: VerifyScope): Promise<void> {
   const p = read(project)
   if (!p) return
   set(verifying, true)
   set(sent, null)
   try {
-    const answer = await plugin.request('memory.verify', { slug: p.slug }, { timeoutMs: 60_000 })
+    const answer = await plugin.request('memory.verify', { slug: p.slug, scope }, { timeoutMs: 60_000 })
+    const who = answer.via === 'terminal' ? 'Envoyé à Claude.' : 'Claude lancé dans un nouveau terminal.'
     set(sent, {
       ok: true,
-      text:
-        answer.via === 'terminal'
-          ? 'Envoyé à Claude. Il corrigera et proposera les suppressions sans les faire.'
-          : 'Claude lancé dans un nouveau terminal. Il corrigera et proposera les suppressions sans les faire.'
+      text: scope === 'branch' ? `${who} Il mettra ces mémoires à jour dans ta branche.` : `${who} Il corrigera et proposera les suppressions sans les faire.`
     })
   } catch (e) {
     set(sent, { ok: false, text: message(e) })
   } finally {
     set(verifying, false)
   }
+}
+
+/** Seeing the recent tab is seeing what Claude learned: the « new » marks and the count go. */
+function showTab(next: string): void {
+  set(tab, next)
+  const p = read(project)
+  if (next === 'recent' && p?.unseen.length) void plugin.request('memory.seen', { slug: p.slug })
 }
 
 export function setup(ctx: PanelContext): void {
@@ -173,6 +178,10 @@ export function setup(ctx: PanelContext): void {
         reset()
         void load()
       }
+    }),
+    // Claude just wrote a memory of this project: show it without a click.
+    plugin.on('memory.changed', ({ slug }) => {
+      if (read(project)?.slug === slug) void load()
     })
   )
 }
@@ -180,6 +189,7 @@ export function setup(ctx: PanelContext): void {
 function Header({ p }: { p: ProjectView }) {
   const list = read(projects)
   const source = p.detectedFrom ? `Suit le workspace « ${p.detectedFrom} »` : 'Projet choisi à la main'
+  const where = p.checked ? `Code vérifié sur ${p.checked.branch ?? 'la copie de travail'}` : 'Code non vérifié : aucun workspace ne correspond'
   return (
     <Stack gap="xs">
       <Row justify="between" align="center">
@@ -188,11 +198,14 @@ function Header({ p }: { p: ProjectView }) {
           {list.length > 1 ? (
             <IconButton icon="folder" label="Changer de projet" tooltip={source} variant="ghost" size="sm" onPress={() => update(picking, (v) => !v)} />
           ) : null}
-          <IconButton icon="refresh" label="Relire" variant="ghost" size="sm" onPress={load} />
+          <IconButton icon="refresh" label="Relire" tooltip="Relire la mémoire et le code" variant="ghost" size="sm" onPress={load} />
         </Row>
       </Row>
       <Text muted size="xs">
         {`${p.memories.length} mémoires · ${tokens(p.index.bytes)}`}
+      </Text>
+      <Text muted size="xs">
+        {where}
       </Text>
       {read(picking) ? (
         <Stack gap="xs">
@@ -213,30 +226,58 @@ function Header({ p }: { p: ProjectView }) {
   )
 }
 
+function Sent() {
+  const said = read(sent)
+  if (!said) return null
+  return (
+    <Text size="sm" tone={said.ok ? 'success' : 'danger'}>
+      {said.text}
+    </Text>
+  )
+}
+
+/**
+ * One verdict, one action. What the checked branch broke comes first: it is the cause in hand,
+ * fixed in the same branch. Otherwise the general health, with the share of sound memories.
+ */
 function Health({ p }: { p: ProjectView }) {
   const unsafe = read(verifyList).length
+  const broken = p.memories.filter((m) => m.brokenHere.length)
   const total = p.memories.length
   const busy = read(verifying)
-  const said = read(sent)
+  const done = read(sent)?.ok === true
+
+  if (broken.length) {
+    return (
+      <Callout tone="danger" icon="branch" title={`Ta branche rend ${plural(broken.length, 'mémoire fausse', 'mémoires fausses')}`}>
+        <Stack gap="sm">
+          <Text size="sm">{`${p.checked?.branch ?? 'Elle'} retire ou déplace des fichiers qu’elles citent, encore présents sur ${p.base ?? 'la branche par défaut'}. Le bon moment pour les corriger, c’est maintenant.`}</Text>
+          <Sent />
+          {done ? null : (
+            <Button variant="solid" tone="accent" icon="agent" disabled={busy} onPress={() => verify('branch')}>
+              {busy ? 'Envoi à Claude…' : 'Les faire mettre à jour par Claude'}
+            </Button>
+          )}
+        </Stack>
+      </Callout>
+    )
+  }
   if (unsafe === 0 && p.indexProblems.length === 0) {
     return (
       <Callout tone="success" icon="check" title="Mémoire saine">
-        <Text size="sm">
-          {p.repo ? 'Chaque fichier cité existe, chaque lien mène quelque part.' : 'Liens vérifiés, code non vérifié : aucun workspace ne correspond à ce projet.'}
-        </Text>
+        <Text size="sm">{p.checked ? 'Chaque fichier cité existe, chaque lien mène quelque part.' : 'Chaque lien mène quelque part.'}</Text>
       </Callout>
     )
   }
   const title = unsafe > 0 ? `${plural(unsafe, 'mémoire n’est', 'mémoires ne sont')} plus sûre${unsafe > 1 ? 's' : ''}` : 'L’index de la mémoire est à corriger'
   return (
-    <Callout tone={said?.ok ? 'accent' : 'warning'} icon={said?.ok ? 'agent' : 'warning'} title={title}>
+    <Callout tone="warning" icon="warning" title={title}>
       <Stack gap="sm">
-        <Text size="sm" tone={said && !said.ok ? 'danger' : undefined}>
-          {said ? said.text : p.repo ? 'Elles citent du code supprimé ou des liens cassés.' : 'Liens cassés ou index incomplet. Code non vérifié : aucun workspace ne correspond.'}
-        </Text>
+        <Text size="sm">{p.checked ? 'Elles citent du code supprimé ou des liens cassés.' : 'Liens cassés ou index incomplet.'}</Text>
         {total > 0 ? <Progress label={`Saines : ${total - unsafe} sur ${total}`} value={Math.round(((total - unsafe) / total) * 100)} /> : null}
-        {said?.ok ? null : (
-          <Button variant="solid" tone="accent" icon="agent" disabled={busy} onPress={verify}>
+        <Sent />
+        {done ? null : (
+          <Button variant="solid" tone="accent" icon="agent" disabled={busy} onPress={() => verify('all')}>
             {busy ? 'Envoi à Claude…' : 'Faire vérifier par Claude'}
           </Button>
         )}
@@ -248,28 +289,36 @@ function Health({ p }: { p: ProjectView }) {
 function ToVerifyTab({ p }: { p: ProjectView }) {
   const items = read(verifyList)
   if (items.length === 0 && p.indexProblems.length === 0) return <EmptyState icon="check" title="Rien à vérifier" />
+  // What the branch broke first: it is the part the person can fix where they are.
+  const ordered = [...items.filter((m) => m.brokenHere.length), ...items.filter((m) => !m.brokenHere.length)]
   return (
     <List label="Mémoires à vérifier">
       {p.indexProblems.map((text) => (
         <ListItem icon="error" title="Index MEMORY.md" description={text} />
       ))}
-      {items.map((m) => (
-        <ListItem icon={m.missingPaths.length ? 'warning' : 'link'} title={m.title} description={reason(m)} onPress={() => void open(m.file)} />
+      {ordered.map((m) => (
+        <ListItem
+          icon={m.brokenHere.length ? 'branch' : m.missingPaths.length ? 'warning' : 'link'}
+          title={m.title}
+          description={m.brokenHere.length ? `Ta branche retire ${plural(m.brokenHere.length, 'fichier cité', 'fichiers cités')}` : reason(m)}
+          onPress={() => void open(m.file)}
+        />
       ))}
     </List>
   )
 }
 
-function RecentTab({ recent }: { recent: Memory[] }) {
+function RecentTab({ p, recent }: { p: ProjectView; recent: Memory[] }) {
   const flagged = read(suspect)
+  const fresh = new Set(p.unseen)
   if (recent.length === 0) return <EmptyState icon="calendar" title={`Rien appris ces ${RECENT_DAYS} derniers jours`} />
   return (
     <List label="Mémoires récentes">
       {recent.map((m) => (
         <ListItem
-          icon={flagged.has(m.file) ? 'warning' : undefined}
+          icon={fresh.has(m.file) ? 'star' : flagged.has(m.file) ? 'warning' : undefined}
           title={m.title}
-          description={`${capitalize(ago(m.mtimeMs))} · ${TYPE[m.type].one}`}
+          description={`${fresh.has(m.file) ? 'Nouveau · ' : ''}${capitalize(ago(m.mtimeMs))} · ${TYPE[m.type].one}`}
           onPress={() => void open(m.file)}
         />
       ))}
@@ -303,6 +352,19 @@ function AllTab({ p }: { p: ProjectView }) {
   )
 }
 
+function PathList({ label, paths }: { label: string; paths: string[] }) {
+  return (
+    <Stack gap="xs">
+      <Text size="sm">{label}</Text>
+      {paths.map((path) => (
+        <Text size="xs">
+          <Code>{path}</Code>
+        </Text>
+      ))}
+    </Stack>
+  )
+}
+
 function Detail({ p, file, body }: { p: ProjectView; file: string; body: string | null }) {
   const m = p.memories.find((x) => x.file === file)
   if (!m) return null
@@ -323,17 +385,14 @@ function Detail({ p, file, body }: { p: ProjectView; file: string; body: string 
         ]}
       />
       {m.missingPaths.length || m.problems.length ? (
-        <Callout tone="warning" icon="warning" title="Peut-être plus vraie">
+        <Callout tone={m.brokenHere.length ? 'danger' : 'warning'} icon={m.brokenHere.length ? 'branch' : 'warning'} title={m.brokenHere.length ? 'Ta branche la rend fausse' : 'Peut-être plus vraie'}>
           <Stack gap="xs">
-            {m.missingPaths.length ? (
-              <Stack gap="xs">
-                <Text size="sm">{`${plural(m.missingPaths.length, 'fichier cité introuvable', 'fichiers cités introuvables')} :`}</Text>
-                {m.missingPaths.map((path) => (
-                  <Text size="xs">
-                    <Code>{path}</Code>
-                  </Text>
-                ))}
-              </Stack>
+            {m.brokenHere.length ? <PathList label={`Retiré${m.brokenHere.length > 1 ? 's' : ''} par ta branche :`} paths={m.brokenHere} /> : null}
+            {m.missingPaths.length > m.brokenHere.length ? (
+              <PathList
+                label={`${plural(m.missingPaths.length - m.brokenHere.length, 'fichier cité introuvable', 'fichiers cités introuvables')} :`}
+                paths={m.missingPaths.filter((x) => !m.brokenHere.includes(x))}
+              />
             ) : null}
             {m.problems.map((x) => (
               <Text size="sm">{x.detail}</Text>
@@ -381,12 +440,12 @@ export default function Panel() {
     <Stack gap="lg">
       <Header p={p} />
       <Health p={p} />
-      <Tabs label="Mémoires" value={current} onChange={(v) => set(tab, v)}>
+      <Tabs label="Mémoires" value={current} onChange={showTab}>
         <Tab value="verify" label={`À vérifier ${toCheck}`}>
           <ToVerifyTab p={p} />
         </Tab>
-        <Tab value="recent" label={`Récentes ${recent.length}`}>
-          <RecentTab recent={recent} />
+        <Tab value="recent" label={p.unseen.length ? `Récentes ${recent.length} · +${p.unseen.length}` : `Récentes ${recent.length}`}>
+          <RecentTab p={p} recent={recent} />
         </Tab>
         <Tab value="all" label={`Toutes ${p.memories.length}`}>
           <AllTab p={p} />

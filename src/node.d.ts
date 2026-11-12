@@ -18,6 +18,7 @@ declare module 'node:path' {
 }
 declare const process: { argv: string[]; exitCode?: number; stdout: { write(s: string): boolean } }
 declare module 'node:child_process' {
+  export function execFileSync(file: string, args: readonly string[], options: { cwd?: string; encoding?: 'utf8' }): string
   export function execFile(
     file: string,
     args: readonly string[],

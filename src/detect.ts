@@ -53,3 +53,19 @@ export function repoOfSlug(slug: string, workspaces: readonly { path: string; gi
   }
   return null
 }
+
+/** The memory a written file is, when it lies in `<root>/<slug>/memory/` (the index excluded). */
+export function memoryOfPath(path: string, root: string): { slug: string; file: string } | null {
+  const prefix = root.replace(/[/\\]+$/, '')
+  if (!path.startsWith(`${prefix}/`)) return null
+  const m = /^([^/\\]+)[/\\]memory[/\\]([^/\\]+\.md)$/.exec(path.slice(prefix.length + 1))
+  if (!m || m[2] === 'MEMORY.md') return null
+  return { slug: m[1] as string, file: m[2] as string }
+}
+
+/** The file path of a tool call that writes one: Write, Edit, MultiEdit (`file_path`). */
+export function writtenPath(tool: string, input: unknown): string | null {
+  if (!/^(Write|Edit|MultiEdit)$/.test(tool) || typeof input !== 'object' || input === null) return null
+  const path = (input as { file_path?: unknown }).file_path
+  return typeof path === 'string' ? path : null
+}
