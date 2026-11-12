@@ -16,6 +16,10 @@ export interface ProjectView extends Audit {
   base: string | null
   /** Memories Claude wrote since the person last opened the panel (files). */
   unseen: string[]
+  /** How often Claude read each memory (file -> count, last time), since `trackingSince`. */
+  reads: Record<string, { count: number; last: number }>
+  /** When the plugin started counting reads for this project. */
+  trackingSince: number
 }
 
 export type VerifyScope = 'all' | 'branch'

@@ -120,3 +120,28 @@ test('ignores tool calls that write no memory', async () => {
   assert.deepEqual(worker.posts, [])
   await worker.deactivate()
 })
+
+test('counts the memories Claude reads, from when counting began', async () => {
+  const worker = await mountWorker(main, { host: host('ok') })
+  const before = (await worker.request('memory.view')).project
+  assert.deepEqual(before?.reads, {})
+  assert.ok((before?.trackingSince ?? 0) > 0)
+  const read = { agent: 'claude', workspaceId: 'w-ok', tool: 'Read', input: { file_path: `${root}/-demo-ok/memory/stack.md` } }
+  await worker.hooks.fire('agent.tool.after', read)
+  await worker.hooks.fire('agent.tool.after', read)
+  for (let i = 0; i < 10; i++) await worker.request('memory.projects')
+  const reads = (await worker.request('memory.view')).project?.reads ?? {}
+  assert.equal(reads['stack.md']?.count, 2)
+  await worker.deactivate()
+})
+
+test('a memory written with a dead link is announced as one to review', async () => {
+  const h = host('broken', { 'notifications.show': { delivered: true } })
+  const worker = await mountWorker(main, { host: h })
+  await worker.hooks.fire('agent.tool.after', { agent: 'claude', workspaceId: 'w-broken', tool: 'Write', input: { file_path: `${root}/-demo-broken/memory/release.md` } })
+  await until(worker, () => worker.posts.length > 0)
+  const [shown] = h.callsOf('notifications.show') as { title: string; body: string }[]
+  assert.equal(shown?.title, 'Claude a retenu quelque chose, à revoir')
+  assert.ok(shown?.body.includes('un lien vers rien'))
+  await worker.deactivate()
+})

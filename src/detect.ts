@@ -84,3 +84,10 @@ export function workspaceFor<W extends { path: string; gitFile: string | null }>
   if (focused && candidateSlugs(focused.path, focused.gitFile).includes(slug)) return focused
   return all.find((w) => candidateSlugs(w.path, w.gitFile).includes(slug)) ?? null
 }
+
+/** The file path of a Read tool call, the way Claude Code opens a memory it needs. */
+export function readPath(tool: string, input: unknown): string | null {
+  if (tool !== 'Read' || typeof input !== 'object' || input === null) return null
+  const path = (input as { file_path?: unknown }).file_path
+  return typeof path === 'string' ? path : null
+}

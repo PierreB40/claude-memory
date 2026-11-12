@@ -286,3 +286,13 @@ export function readableBody(body: string, memories: readonly Pick<Memory, 'file
     return title ? `*« ${title} »*` : `*${slug} (introuvable)*`
   })
 }
+
+/** What is wrong with a memory just written, in a few words for a notification; null if nothing. */
+export function writeVerdict(m: Memory): string | null {
+  const parts: string[] = []
+  if (m.missingPaths.length) parts.push(`cite ${m.missingPaths.length > 1 ? `${m.missingPaths.length} fichiers introuvables` : 'un fichier introuvable'}`)
+  const dead = m.problems.filter((p) => p.short === 'Lien mort').length
+  if (dead) parts.push(dead > 1 ? `${dead} liens vers rien` : 'un lien vers rien')
+  if (m.problems.some((p) => p.short === 'Hors index')) parts.push('absente de MEMORY.md')
+  return parts.length ? parts.join(', ') : null
+}

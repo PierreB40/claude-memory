@@ -363,6 +363,14 @@ function Links({ label, items }: { label: string; items: Memory[] }) {
   )
 }
 
+/** How often Claude opened a memory, honest about when counting began. */
+function readsLabel(p: ProjectView, file: string): string {
+  const r = p.reads[file]
+  const since = new Date(p.trackingSince).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+  if (!r) return `Jamais depuis le ${since}`
+  return `${r.count} fois, la dernière ${ago(r.last)}`
+}
+
 function Detail({ p, file, body }: { p: ProjectView; file: string; body: string | null }) {
   const m = p.memories.find((x) => x.file === file)
   if (!m) return null
@@ -418,6 +426,7 @@ function Detail({ p, file, body }: { p: ProjectView; file: string; body: string 
             { label: 'Fichier', value: m.file, code: true },
             ...(m.name && m.name !== m.file.replace(/\.md$/, '') ? [{ label: 'Nom', value: m.name, code: true }] : []),
             { label: 'Dans l’index', value: m.indexed ? 'Oui' : 'Non — Claude ne la voit pas', tone: m.indexed ? 'neutral' : 'warning' },
+            { label: 'Relue par Claude', value: readsLabel(p, m.file) },
             { label: 'Chemins cités', value: m.cited ? (m.missingPaths.length ? `${m.cited}, dont ${m.missingPaths.length} introuvable${m.missingPaths.length > 1 ? 's' : ''}` : `${m.cited}`) : 'Aucun' }
           ]}
         />

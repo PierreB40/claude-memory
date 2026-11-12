@@ -31,6 +31,8 @@ const project = (memories: Memory[], over: Partial<ProjectView> = {}): ProjectVi
   checked: { path: '/r', branch: 'feat/x' },
   base: 'origin/main',
   unseen: [],
+  reads: {},
+  trackingSince: Date.UTC(2026, 10, 12),
   memories,
   indexProblems: [],
   index: { present: true, lines: 3, bytes: 4000 },
@@ -120,6 +122,7 @@ test('a memory opens in place, says what it points to and what points to it, and
   assert.ok(tree.includes('Renvoie à · 1') && tree.includes('La cible'))
   assert.ok(tree.includes('Citée par · 1') && tree.includes('Une source'))
   assert.ok(tree.includes('Dans l’index'))
+  assert.ok(tree.includes('Jamais depuis le 12 nov.'))
   await v.press({ type: 'Button', text: /Mémoires/ })
   assert.ok(drawn(v).includes('"label":"Rechercher"') || drawn(v).includes('Rechercher'))
   await v.unmount()

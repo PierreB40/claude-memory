@@ -1,6 +1,6 @@
 import { assert, test } from 'orca/testing'
 import { execFileSync } from 'node:child_process'
-import { candidateSlugs, claudeCommand, mainCheckoutOf, matchWorkspace, memoryOfPath, repoOfSlug, slugOf, writtenPath } from './detect.ts'
+import { candidateSlugs, claudeCommand, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, repoOfSlug, slugOf, writtenPath } from './detect.ts'
 
 const ws = (id: string, name: string, path: string, branch: string | null) => ({ id, name, path, branch })
 
@@ -52,4 +52,10 @@ test('the Claude command line keeps the prompt intact through a shell', () => {
   const prompt = "Corrige `src/a.ts` (l'index), \$HOME et \"guillemets\" ; rien d'autre."
   const echoed = execFileSync('sh', ['-c', claudeCommand(prompt).replace(/^claude /, 'printf %s ')], { encoding: 'utf8' })
   assert.equal(echoed, prompt)
+})
+
+test('a Read of a file is recognised, nothing else', () => {
+  assert.equal(readPath('Read', { file_path: '/m/a.md' }), '/m/a.md')
+  assert.equal(readPath('Write', { file_path: '/m/a.md' }), null)
+  assert.equal(readPath('Read', 'x'), null)
 })

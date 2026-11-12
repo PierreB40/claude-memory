@@ -2,13 +2,39 @@
 // keeps the status bar item current, hears Claude write a memory (agent.tool.after) and runs the
 // palette commands. It never writes a memory: fixing is handed to a Claude agent.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { audit, bodyOf, branchPrompt, DEFAULT_OPTIONS, readableBody, toVerify, verifyPrompt } from './audit.ts'
-import { candidateSlugs, claudeCommand, matchWorkspace, memoryOfPath, repoOfSlug, workspaceFor, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { audit, bodyOf, branchPrompt, DEFAULT_OPTIONS, readableBody, toVerify, verifyPrompt, writeVerdict } from './audit.ts'
+import { candidateSlugs, claudeCommand, matchWorkspace, memoryOfPath, readPath, repoOfSlug, workspaceFor, writtenPath, type WorkspaceInfo } from './detect.ts'
 import type { ProjectView, VerifyScope } from './protocol.ts'
 import { baseRef, currentBranch, filesAt, listProjects, memoryDir, projectsRoot, readGitFile, readMemory, readMemoryFolder, trackedFiles } from './store.ts'
 
 const STATUS = 'health'
 const unseenKey = (slug: string): string => `unseen:${slug}`
+const readsKey = (slug: string): string => `reads:${slug}`
+const sinceKey = (slug: string): string => `tracking:${slug}`
+
+export type Reads = Record<string, { count: number; last: number }>
+
+async function readsOf(orca: OrcaWorkerApi, slug: string): Promise<Reads> {
+  const value = await orca.storage.get(readsKey(slug))
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as unknown as Reads) : {}
+}
+
+/** When counting began for a project: « never read » means nothing before that date. */
+async function trackingSince(orca: OrcaWorkerApi, slug: string): Promise<number> {
+  const value = await orca.storage.get(sinceKey(slug))
+  if (typeof value === 'number') return value
+  const now = Date.now()
+  await orca.storage.set(sinceKey(slug), now)
+  return now
+}
+
+async function recordRead(orca: OrcaWorkerApi, slug: string, file: string): Promise<void> {
+  await trackingSince(orca, slug)
+  const reads = await readsOf(orca, slug)
+  const now = Date.now()
+  reads[file] = { count: (reads[file]?.count ?? 0) + 1, last: now }
+  await orca.storage.set(readsKey(slug), reads)
+}
 
 async function rootOf(orca: OrcaWorkerApi): Promise<string> {
   const root = await orca.settings.get('projectsRoot')
@@ -69,7 +95,9 @@ async function view(orca: OrcaWorkerApi): Promise<ProjectView | null> {
     detectedFrom: focused.name,
     checked: checkout && repoFiles ? { path: checkout, branch } : null,
     base: baseFiles ? compare : null,
-    unseen: (await unseenOf(orca, slug)).filter((f) => present.has(f))
+    unseen: (await unseenOf(orca, slug)).filter((f) => present.has(f)),
+    reads: await readsOf(orca, slug),
+    trackingSince: await trackingSince(orca, slug)
   }
 }
 
@@ -159,23 +187,40 @@ export default function activate(orca: OrcaWorkerApi): void {
   })
 
   // Claude wrote a memory: say so once, mark it new, and let open panels reload.
+  // Every tool call of an agent passes here: only reads and writes of a memory file matter.
+  // A read is counted (which memories Claude actually uses); a write is announced, with what is
+  // wrong with it while Claude still has the context to fix it.
   orca.hooks.on('agent.tool.after', (event) => {
-    const path = writtenPath(event.tool, event.input)
-    if (!path) return
+    const written = writtenPath(event.tool, event.input)
+    const consulted = written ? null : readPath(event.tool, event.input)
+    if (!written && !consulted) return
     // Orca does not wait for an after-hook; returning the work only lets tests await it.
     return (async () => {
       const root = await rootOf(orca)
-      const memory = memoryOfPath(path, root)
+      const memory = memoryOfPath((written ?? consulted) as string, root)
       if (!memory) return
+      if (consulted) {
+        await recordRead(orca, memory.slug, memory.file)
+        return
+      }
       const unseen = await unseenOf(orca, memory.slug)
       if (!unseen.includes(memory.file)) await orca.storage.set(unseenKey(memory.slug), [...unseen, memory.file])
+      // The agent's own workspace holds the code the memory speaks of.
+      const { all } = await workspaces(orca)
+      const checkout = all.find((w) => w.id === event.workspaceId)?.path ?? null
+      const repoFiles = checkout ? await trackedFiles(checkout) : null
       const files = await readMemoryFolder(memory.slug, root).catch(() => [])
-      const title = audit(files).memories.find((m) => m.file === memory.file)?.title ?? memory.file
-      await orca.host.call('notifications.show', { title: 'Claude a retenu quelque chose', body: title }).catch(() => undefined)
+      const justWritten = audit(files, { ...DEFAULT_OPTIONS, repoFiles }).memories.find((m) => m.file === memory.file)
+      const verdict = justWritten ? writeVerdict(justWritten) : null
+      const title = justWritten?.title ?? memory.file
+      await orca.host
+        .call('notifications.show', verdict ? { title: 'Claude a retenu quelque chose, à revoir', body: `${title} : ${verdict}.` } : { title: 'Claude a retenu quelque chose', body: title })
+        .catch(() => undefined)
       orca.panels.post('memory.changed', memory)
       await refreshStatus(orca)
     })()
   })
+
 
   // A new focused workspace may be another project; terminal opens and closes are not.
   let last: string | undefined
