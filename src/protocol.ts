@@ -27,14 +27,19 @@ export interface PanelView {
   unmatched?: boolean
 }
 
+/** Orca's language (BCP-47), which only panels know: the worker speaks it from then on. */
+interface Spoken {
+  locale?: string
+}
+
 declare module 'orca' {
   interface PluginRequests {
     /** The focused workspace and its project, audited. */
-    'memory.view': { output: PanelView }
+    'memory.view': { input: Spoken; output: PanelView }
     /** One memory's text, without its header, its `[[links]]` read as titles. */
-    'memory.read': { input: { slug: string; file: string }; output: { body: string } }
+    'memory.read': { input: { slug: string; file: string } & Spoken; output: { body: string } }
     /** Starts a new Claude in a terminal of the focused workspace, what to verify as its first message. */
-    'memory.verify': { output: { count: number; workspace: string } }
+    'memory.verify': { input: Spoken; output: { count: number; workspace: string } }
     /** The person saw these memories (all new ones when `files` is left out). */
     'memory.seen': { input: { slug: string; files?: string[] }; output: { ok: true } }
   }

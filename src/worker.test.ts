@@ -18,6 +18,12 @@ const host = (focus: string | null, results: Record<string, unknown> = {}, works
   })
 
 type Worker = Awaited<ReturnType<typeof mountWorker>>
+/** A worker whose panel spoke French, as Orca in French does: the words below are French. */
+async function french(h: ReturnType<typeof host>): Promise<Worker> {
+  const worker = await mountWorker(main, { host: h })
+  await worker.request('memory.view', { locale: 'fr-FR' })
+  return worker
+}
 /**
  * Work the worker starts on its own (activation, an after-hook nobody waits for) only moves while
  * the test kit serves a call: keep one going until its effect shows.
@@ -39,16 +45,16 @@ test('follows the focused workspace, and only it', async () => {
   assert.equal(view.project?.slug, '-demo-broken')
   assert.equal(view.project?.label, 'broken')
   assert.equal(view.project?.branch, null, 'not a git checkout: code unchecked')
-  assert.deepEqual(view.project?.indexProblems, ["MEMORY.md renvoie vers ancien.md, qui n'existe plus."])
+  assert.deepEqual(view.project?.indexProblems, [{ kind: 'dangling', file: 'ancien.md' }])
   await broken.deactivate()
 
-  const ok = await mountWorker(main, { host: host('ok') })
+  const ok = await french(host('ok'))
   assert.equal((await ok.request('memory.view')).project?.slug, '-demo-ok')
   await ok.deactivate()
 })
 
 test('no memory, no workspace, or an ambiguous one: says which, never shows another project', async () => {
-  const other = await mountWorker(main, { host: host('other') })
+  const other = await french(host('other'))
   assert.deepEqual(await other.request('memory.view'), { project: null, workspace: 'other' })
   await other.deactivate()
   const none = await mountWorker(main, { host: host(null) })
@@ -60,7 +66,7 @@ test('no memory, no workspace, or an ambiguous one: says which, never shows anot
 })
 
 test('reads one memory without its header, and refuses a path out of the folder', async () => {
-  const worker = await mountWorker(main, { host: host('ok') })
+  const worker = await french(host('ok'))
   assert.deepEqual(await worker.request('memory.read', { slug: '-demo-ok', file: 'stack.md' }), { body: "Le front est Nuxt, l'API est Hono." })
   await assert.rejects(worker.request('memory.read', { slug: '-demo-ok', file: '../../x.md' }))
   await worker.deactivate()
@@ -68,7 +74,7 @@ test('reads one memory without its header, and refuses a path out of the folder'
 
 test('the status bar: the count to verify, hidden without a memory', async () => {
   const h = host('broken')
-  const worker = await mountWorker(main, { host: h })
+  const worker = await french(h)
   await until(worker, () => h.calls.some((c) => c.method === 'statusBar.update'))
   const last = h.callsOf('statusBar.update').pop() as { text: string; tone: string; visible: boolean }
   assert.deepEqual([last.visible, last.tone, last.text], [true, 'warning', '4'])
@@ -83,7 +89,7 @@ test('the status bar: the count to verify, hidden without a memory', async () =>
 
 test('verify starts a NEW Claude in the focused workspace, the request as its first message', async () => {
   const h = host('broken', { 'terminal.create': { terminalId: 't9' } })
-  const worker = await mountWorker(main, { host: h })
+  const worker = await french(h)
   assert.deepEqual(await worker.request('memory.verify'), { count: 4, workspace: 'broken' })
   const created = h.callsOf('terminal.create')[0] as { workspaceId: string; command: string }
   assert.equal(created.workspaceId, 'w-broken')
@@ -93,17 +99,17 @@ test('verify starts a NEW Claude in the focused workspace, the request as its fi
 })
 
 test('verify refuses when the workspace has no memory, or nothing is wrong', async () => {
-  const other = await mountWorker(main, { host: host('other') })
+  const other = await french(host('other'))
   await assert.rejects(other.request('memory.verify'), /aucune mémoire/)
   await other.deactivate()
-  const ok = await mountWorker(main, { host: host('ok') })
+  const ok = await french(host('ok'))
   await assert.rejects(ok.request('memory.verify'), /Rien à vérifier/)
   await ok.deactivate()
 })
 
 test('a memory written: announced once, marked new until seen, panels told', async () => {
   const h = host('ok')
-  const worker = await mountWorker(main, { host: h })
+  const worker = await french(h)
   await fire(worker, 'Write', `${root}/-demo-ok/memory/stack.md`, 'w-ok')
   await until(worker, () => worker.posts.length > 0)
   assert.deepEqual(h.callsOf('notifications.show'), [{ title: 'Claude a retenu quelque chose', body: 'Nuxt + Hono' }])
@@ -116,7 +122,7 @@ test('a memory written: announced once, marked new until seen, panels told', asy
 
 test('a memory written with a dead link is announced as one to review', async () => {
   const h = host('broken')
-  const worker = await mountWorker(main, { host: h })
+  const worker = await french(h)
   await fire(worker, 'Write', `${root}/-demo-broken/memory/release.md`, 'w-broken')
   await until(worker, () => worker.posts.length > 0)
   const [shown] = h.callsOf('notifications.show') as { title: string; body: string }[]
@@ -127,7 +133,7 @@ test('a memory written with a dead link is announced as one to review', async ()
 
 test('the index written: panels told, no notification; a failed write: nothing', async () => {
   const h = host('ok')
-  const worker = await mountWorker(main, { host: h })
+  const worker = await french(h)
   await fire(worker, 'Edit', `${root}/-demo-ok/memory/MEMORY.md`)
   await until(worker, () => worker.posts.length > 0)
   await fire(worker, 'Write', `${root}/-demo-ok/memory/never-written.md`)
@@ -155,11 +161,26 @@ test('reads: counted per memory, at once without loss, a reading in parts counte
 
 test('tool calls that touch no memory are ignored', async () => {
   const h = host('ok')
-  const worker = await mountWorker(main, { host: h })
+  const worker = await french(h)
   await fire(worker, 'Write', '/repo/src/a.ts')
   await fire(worker, 'Bash', `${root}/-demo-ok/memory/stack.md`)
   await settle(worker)
   assert.deepEqual(h.callsOf('notifications.show'), [])
   assert.deepEqual(worker.posts, [])
+  await worker.deactivate()
+})
+
+test('the worker speaks the language the panel tells it: notifications and the request to Claude', async () => {
+  const h = host('broken', { 'terminal.create': { terminalId: 't1' } })
+  const worker = await mountWorker(main, { host: h })
+  await worker.request('memory.view', { locale: 'en-US' })
+  await fire(worker, 'Write', `${root}/-demo-broken/memory/release.md`, 'w-broken')
+  await until(worker, () => worker.posts.length > 0)
+  const [shown] = h.callsOf('notifications.show') as { title: string }[]
+  assert.equal(shown?.title, 'Claude remembered something, to review')
+  await worker.request('memory.verify', { locale: 'en-US' })
+  const created = h.callsOf('terminal.create')[0] as { title: string; command: string }
+  assert.equal(created.title, 'Claude · memory')
+  assert.ok(created.command.startsWith("claude 'Review your auto memory"))
   await worker.deactivate()
 })

@@ -13,10 +13,13 @@ import {
   splitDescription,
   toVerify,
   verifyCount,
-  verifyPrompt,
-  writeVerdict,
+  writeDefects,
   type MemoryFile
 } from './audit.ts'
+import { langOf, words } from './i18n.ts'
+
+const fr = words('fr')
+const en = words('en')
 
 const md = (name: string, type: string, body = '', description = 'd'): string => `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: ${type}\n---\n\n${body}\n`
 const file = (f: string, content: string): MemoryFile => ({ file: f, content, mtimeMs: 0 })
@@ -62,10 +65,10 @@ test('titles come from the index text, else the description, else the name', () 
   ])
 })
 
-test('defects: dead link, link by file name, unindexed, dangling index entry', () => {
+test('defects: dead link, unindexed, dangling index entry; a link by file name leads to the memory', () => {
   const files = [file('MEMORY.md', '- [A](a.md)\n- [Gone](gone.md)'), file('a.md', md('a', 'user', '[[nowhere]] [[b_file]]')), file('b_file.md', md('b-name', 'user'))]
-  assert.deepEqual(kinds(files).sort(), ['dead-link:a.md', 'link-by-file:a.md', 'unindexed:b_file.md'])
-  assert.deepEqual(audit(files).indexProblems, ["MEMORY.md renvoie vers gone.md, qui n'existe plus."])
+  assert.deepEqual(kinds(files).sort(), ['dead-link:a.md', 'unindexed:b_file.md'])
+  assert.deepEqual(audit(files).indexProblems, [{ kind: 'dangling', file: 'gone.md' }])
   assert.deepEqual(audit(files).memories.find((m) => m.file === 'a.md')?.related, ['b_file.md'])
 })
 
@@ -88,6 +91,14 @@ test('a path holds as a suffix; one outside every repository folder is not judge
   assert.ok(index.judges('docs/gone.md') && !index.judges('maplibre-gl/dist/x.css') && !index.judges('staging.example.com/c.json'))
 })
 
+test('a path with a placeholder holds when a file fits it; a real bracketed file is a file', () => {
+  const index = indexPaths(['apps/web/__tests__/email.test.ts', 'pages/orders/[id].vue', 'apps/api/src/a.ts', 'db/migrations/0001_init.sql'])
+  assert.ok(index.has('migrations/NNNN_*.sql') && index.has('db/migrations/*.sql'))
+  assert.ok(index.has('__tests__/[nom].test.ts') && index.has('apps/<app>/src/a.ts') && index.has('apps/*/src/a.ts') && index.has('orders/[id].vue'))
+  assert.ok(!index.has('__tests__/[nom].spec.ts') && !index.has('apps/<app>/src/b.ts'))
+  assert.deepEqual(citedPaths('`__tests__/[nom].test.ts` `apps/<app>/x.ts`'), ['__tests__/[nom].test.ts', 'apps/<app>/x.ts'])
+})
+
 test('missing everywhere is to verify; removed by the branch only is for the merge', () => {
   const r = audit(
     [
@@ -108,7 +119,7 @@ test('the index line count ignores the final newline, and its budget is checked'
   const lines = (n: number): string => `${Array.from({ length: n }, (_, i) => `- [M${i}](m.md)`).join('\n')}\n`
   assert.equal(audit([file('MEMORY.md', lines(200)), file('m.md', md('m', 'user'))]).index.lines, 200)
   assert.deepEqual(audit([file('MEMORY.md', lines(200)), file('m.md', md('m', 'user'))]).indexProblems, [])
-  assert.deepEqual(audit([file('MEMORY.md', lines(201)), file('m.md', md('m', 'user'))]).indexProblems, ["MEMORY.md fait 201 lignes : Claude n'en lit que 200."])
+  assert.deepEqual(audit([file('MEMORY.md', lines(201)), file('m.md', md('m', 'user'))]).indexProblems, [{ kind: 'too-long', lines: 201, max: 200 }])
 })
 
 test('a description splits into a title and what is left, never mid-emoji', () => {
@@ -121,24 +132,35 @@ test('a description splits into a title and what is left, never mid-emoji', () =
   assert.ok(rest.startsWith('…') && rest.endsWith('fin'))
 })
 
-test('the verify prompt is one line, bounded, and asks to propose deletions', () => {
+test('the verify prompt is one line, bounded, and asks to propose deletions, in both languages', () => {
   const memories = Array.from({ length: 45 }, (_, i) => file(`m${i}.md`, md(`m${i}`, 'project', '[[x]]')))
   const r = audit(memories)
-  const prompt = verifyPrompt('/m', toVerify(r), ['Index trop long.'])
-  assert.ok(!prompt.includes('\n'))
-  assert.ok(prompt.includes('et 5 autres'))
-  assert.ok(prompt.includes('Index : Index trop long.'))
-  assert.ok(prompt.includes('propose-moi la liste de celles à supprimer'))
+  const index = [{ kind: 'too-long' as const, lines: 250, max: 200 }]
+  const french = fr.prompt('/m', toVerify(r), index)
+  assert.ok(!french.includes('\n'))
+  assert.ok(french.includes('et 5 autres'))
+  assert.ok(french.includes('Index : MEMORY.md fait 250 lignes'))
+  assert.ok(french.includes('propose-moi la liste de celles à supprimer'))
+  const english = en.prompt('/m', toVerify(r), index)
+  assert.ok(!english.includes('\n') && english.includes('and 5 more') && english.includes('rather than deleting them yourself'))
+})
+
+test('the language: French for any French locale, English otherwise', () => {
+  assert.deepEqual(['fr-FR', 'fr', 'FR-ca', 'en-US', 'de-DE', '', undefined].map(langOf), ['fr', 'fr', 'fr', 'en', 'en', 'en', 'en'])
 })
 
 test('links in a memory read as titles; a dead one says so; code is left alone', () => {
   const memories = [{ file: 'a_file.md', name: 'a', title: 'La règle A' }]
-  assert.equal(readableBody('Voir [[a]], [[a_file|ici]], [[mort]] et `[[a]]`.', memories), 'Voir *« La règle A »*, *« La règle A »*, *mort (introuvable)* et `[[a]]`.')
+  assert.equal(readableBody('Voir [[a]], [[a_file|ici]], [[mort]] et `[[a]]`.', memories, fr), 'Voir *« La règle A »*, *« La règle A »*, *mort (introuvable)* et `[[a]]`.')
+  assert.equal(readableBody('See [[a]] and [[dead]].', memories, en), 'See *“La règle A”* and *dead (not found)*.')
 })
 
 test('a memory just written: missing files and dead links, never « not in the index » yet', () => {
   const [m] = audit([file('MEMORY.md', ''), file('a.md', md('a', 'user', '[[x]] `src/gone.ts`'))], repo(['src/keep.ts'])).memories
-  assert.equal(m && writeVerdict(m), 'cite un fichier introuvable, un lien vers rien')
+  const defects = m && writeDefects(m)
+  assert.deepEqual(defects, { missing: 1, dead: 1 })
+  assert.equal(defects && fr.writeVerdict('A', defects), 'A : cite un fichier introuvable, un lien vers rien.')
+  assert.equal(defects && en.writeVerdict('A', defects), 'A: cites a missing file, a link to nothing.')
   const [ok] = audit([file('MEMORY.md', ''), file('b.md', md('b', 'user'))]).memories
-  assert.equal(ok && writeVerdict(ok), null)
+  assert.equal(ok && writeDefects(ok), null)
 })

@@ -1,5 +1,6 @@
 // What Claude Code believes about a project (its auto-memory folder) and what no longer holds.
-// Pure: it receives the files already read, so the worker, the CLI and the tests share it.
+// Pure and wordless: it receives the files already read and returns facts, so the worker, the CLI
+// and the tests share it, and src/i18n.ts puts the facts in the reader's language.
 
 export type MemoryType = 'user' | 'feedback' | 'project' | 'reference' | 'unknown'
 
@@ -10,24 +11,17 @@ export interface MemoryFile {
   mtimeMs: number
 }
 
-export type ProblemKind = 'dead-link' | 'link-by-file' | 'unindexed' | 'duplicate-name' | 'no-header'
+/** A defect of one memory. */
+export type Problem =
+  | { kind: 'dead-link'; link: string }
+  | { kind: 'unindexed' }
+  | { kind: 'duplicate-name'; twins: string[] }
+  | { kind: 'no-header' }
 
-export interface Problem {
-  kind: ProblemKind
-  /** A few words for a list row. */
-  short: string
-  /** One sentence for the memory itself. */
-  detail: string
-}
+export type ProblemKind = Problem['kind']
 
-/** The words of each defect, in one place: the panel and the notifications read them here. */
-export const PROBLEM_SHORT: Record<ProblemKind, string> = {
-  'dead-link': 'lien cassé',
-  'link-by-file': 'lien à rediriger',
-  unindexed: 'hors index',
-  'duplicate-name': 'nom en double',
-  'no-header': 'sans en-tête'
-}
+/** A defect of MEMORY.md itself. */
+export type IndexProblem = { kind: 'dangling'; file: string } | { kind: 'too-long'; lines: number; max: number }
 
 export interface Memory {
   file: string
@@ -56,8 +50,7 @@ export interface Memory {
 
 export interface Audit {
   memories: Memory[]
-  /** Defects of MEMORY.md itself (dangling entries, too long). */
-  indexProblems: string[]
+  indexProblems: IndexProblem[]
   index: { present: boolean; lines: number }
 }
 
@@ -155,7 +148,7 @@ export function indexEntries(index: string): Map<string, string> {
   return new Map([...index.matchAll(/\[([^\]]+)\]\(([^)\s]+\.md)\)/g)].map((m) => [(m[2] as string).replace(/^\.\//, ''), m[1] as string]))
 }
 
-const PATH = /`([A-Za-z0-9_.@-]*\/[A-Za-z0-9_./@[\]-]*\.[A-Za-z]{1,5})`/g
+const PATH = /`([A-Za-z0-9_.@-]*\/[A-Za-z0-9_./@[\]<>{}*-]*\.[A-Za-z]{1,5})`/g
 const BUILD = /(^|\/)(node_modules|\.nuxt|dist|\.output|\.git)\//
 
 /** Repository-looking paths quoted in backticks: a slash and an extension, no URL, no home. */
@@ -170,7 +163,11 @@ export function citedPaths(content: string): string[] {
 }
 
 export interface PathIndex {
-  /** A file is the path, or ends with it: memories often abbreviate (`orders/index.vue`). */
+  /**
+   * A file is the path, or ends with it: memories often abbreviate (`orders/index.vue`). A path with
+   * a placeholder (`__tests__/[name].test.ts`, `<app>/x.ts`, `{a}/b.ts`, `*.vue`, `NNNN_x.sql`) that is no file
+   * itself is a pattern: it holds when a file fits it.
+   */
   has(path: string): boolean
   /**
    * Whether the repository can speak of a path: its first folder is one of the repository's.
@@ -178,6 +175,10 @@ export interface PathIndex {
    */
   judges(path: string): boolean
 }
+
+/** `[name]`, `<app>`, `{id}`, `*`, and the `NNNN` or `XXX` of a numbered file. */
+const PLACEHOLDER = /(\[[^\]/]+\]|<[^>/]+>|\{[^}/]+\}|\*|\bN{3,}|\bX{3,})/
+const escape = (s: string): string => s.replace(/[.+?^${}()|[\]\\]/g, (c) => `\\${c}`)
 
 /** Built once per audit: every path suffix and folder name, so each check is a lookup. */
 export function indexPaths(files: readonly string[]): PathIndex {
@@ -188,7 +189,16 @@ export function indexPaths(files: readonly string[]): PathIndex {
     for (let i = 0; i < parts.length; i++) suffixes.add(parts.slice(i).join('/'))
     for (const folder of parts.slice(0, -1)) folders.add(folder)
   }
-  return { has: (p) => suffixes.has(p), judges: (p) => folders.has(p.split('/')[0] ?? '') }
+  const fits = (p: string): boolean => {
+    if (!PLACEHOLDER.test(p)) return false
+    const source = p
+      .split(PLACEHOLDER)
+      .map((part, i) => (i % 2 ? (part === '*' ? '[^/]*' : '[^/]+') : escape(part)))
+      .join('')
+    const pattern = new RegExp(`(^|/)${source}$`)
+    return files.some((f) => pattern.test(f))
+  }
+  return { has: (p) => suffixes.has(p) || fits(p), judges: (p) => folders.has(p.split('/')[0] ?? '') }
 }
 
 /** A slug with its type prefix dropped, as words: the last resort for a title. */
@@ -227,8 +237,6 @@ function titleOf(linkText: string | undefined, description: string | null, name:
   return split.lead.length >= 8 ? { title: split.lead, rest: split.rest } : { title: readable(name ?? slug), rest: description ?? '' }
 }
 
-const problem = (kind: ProblemKind, detail: string): Problem => ({ kind, short: PROBLEM_SHORT[kind], detail })
-
 export function audit(files: readonly MemoryFile[], options: AuditOptions = DEFAULT_OPTIONS): Audit {
   const indexFile = files.find((f) => f.file === INDEX)
   const entries = indexFile ? indexEntries(indexFile.content) : new Map<string, string>()
@@ -242,33 +250,23 @@ export function audit(files: readonly MemoryFile[], options: AuditOptions = DEFA
     const key = fm?.name || slug
     byName.set(key, [...(byName.get(key) ?? []), f.file])
   }
-  const byFile = new Map(parsed.map(({ f, fm, slug }) => [slug, { file: f.file, name: fm?.name || null }]))
+  // Claude Code links by `name:`; older memories link by file name. Both lead to the memory.
+  const byFile = new Map(parsed.map(({ f, slug }) => [slug, f.file]))
 
   const memories: Memory[] = parsed
     .map(({ f, fm, slug }) => {
       const problems: Problem[] = []
       const related: string[] = []
-      if (!fm || !fm.name) problems.push(problem('no-header', "Pas d'en-tête complet (name, description, type) : Claude la retrouve mal."))
+      if (!fm || !fm.name) problems.push({ kind: 'no-header' })
       const name = fm?.name || null
       const twins = byName.get(name ?? slug) ?? []
-      if (twins.length > 1) problems.push(problem('duplicate-name', `Même nom que ${twins.filter((t) => t !== f.file).join(', ')}.`))
+      if (twins.length > 1) problems.push({ kind: 'duplicate-name', twins: twins.filter((t) => t !== f.file) })
       for (const link of extractLinks(bodyOf(f.content))) {
-        const target = byName.get(link)?.[0]
-        if (target) {
-          related.push(target)
-          continue
-        }
-        const byFileName = byFile.get(link)
-        if (byFileName?.name) {
-          related.push(byFileName.file)
-          problems.push(problem('link-by-file', `Le lien [[${link}]] vise un nom de fichier ; le nom de la mémoire est « ${byFileName.name} ».`))
-        } else if (byFileName) {
-          related.push(byFileName.file)
-        } else {
-          problems.push(problem('dead-link', `Le lien [[${link}]] ne mène à aucune mémoire.`))
-        }
+        const target = byName.get(link)?.[0] ?? byFile.get(link)
+        if (target) related.push(target)
+        else problems.push({ kind: 'dead-link', link })
       }
-      if (indexFile && !entries.has(f.file)) problems.push(problem('unindexed', 'Absente de MEMORY.md : Claude ne la voit pas.'))
+      if (indexFile && !entries.has(f.file)) problems.push({ kind: 'unindexed' })
       const cited = citedPaths(f.content)
       return {
         file: f.file,
@@ -285,18 +283,16 @@ export function audit(files: readonly MemoryFile[], options: AuditOptions = DEFA
         indexed: entries.has(f.file)
       }
     })
-    .sort((a, b) => a.title.localeCompare(b.title, 'fr'))
+    .sort((a, b) => a.title.localeCompare(b.title))
 
-  const indexProblems: string[] = []
+  const indexProblems: IndexProblem[] = []
   const present = new Set(files.map((f) => f.file))
   for (const target of entries.keys()) {
-    if (!present.has(target)) indexProblems.push(`MEMORY.md renvoie vers ${target}, qui n'existe plus.`)
+    if (!present.has(target)) indexProblems.push({ kind: 'dangling', file: target })
   }
   // A final newline ends the last line; it does not start another.
   const lines = indexFile ? indexFile.content.replace(/\r?\n$/, '').split(/\r?\n/).length : 0
-  if (lines > options.indexMaxLines) {
-    indexProblems.push(`MEMORY.md fait ${lines} lignes : Claude n'en lit que ${options.indexMaxLines}.`)
-  }
+  if (lines > options.indexMaxLines) indexProblems.push({ kind: 'too-long', lines, max: options.indexMaxLines })
 
   return { memories, indexProblems, index: { present: Boolean(indexFile), lines } }
 }
@@ -318,28 +314,11 @@ export const verifyCount = (result: Audit): number => toVerify(result).length + 
 /** Memories the checked branch will make false once merged (nothing to do before). */
 export const atMerge = (result: Audit): Memory[] => result.memories.filter((m) => m.removedByBranch.length > 0)
 
-const PROMPT_MAX = 40
-
-/** One line, as an agent's TUI submits on newline. Asks to check, never to delete silently. */
-export function verifyPrompt(dir: string, memories: readonly Memory[], indexProblems: readonly string[]): string {
-  const items = memories.slice(0, PROMPT_MAX).map((m) => {
-    const why = [...m.problems.map((p) => p.detail), ...(m.missingPaths.length ? [`cite ${m.missingPaths.map((p) => `\`${p}\``).join(', ')}, introuvable(s) dans le code`] : [])]
-    return `${m.file} (${why.join(' ; ')})`
-  })
-  const more = memories.length > PROMPT_MAX ? ` (et ${memories.length - PROMPT_MAX} autres : traite d'abord celles-ci)` : ''
-  return [
-    `Revois ta mémoire automatique de ce projet (${dir}).`,
-    ...(items.length ? [`Ces mémoires sont peut-être fausses ou mal reliées${more} : ${items.join(' · ')}.`] : []),
-    ...(indexProblems.length ? [`Index : ${indexProblems.join(' ; ')}.`] : []),
-    "Pour chacune, vérifie dans le code actuel : corrige-la si elle reste utile (chemins, liens vers le name: de la cible, ligne dans MEMORY.md), et propose-moi la liste de celles à supprimer plutôt que de les supprimer toi-même."
-  ].join(' ')
-}
-
 /**
  * A memory's text as a person reads it: each `[[slug]]` outside code becomes the title of the
- * memory it names, in « » and italics; a slug that names none says so (a defect to see).
+ * memory it names, quoted and in italics; a slug that names none says so (a defect to see).
  */
-export function readableBody(body: string, memories: readonly Pick<Memory, 'file' | 'name' | 'title'>[]): string {
+export function readableBody(body: string, memories: readonly Pick<Memory, 'file' | 'name' | 'title'>[], words: { quote: (title: string) => string; notFound: string }): string {
   const byKey = new Map<string, string>()
   for (const m of memories) {
     byKey.set(m.file.replace(/\.md$/, ''), m.title)
@@ -348,7 +327,7 @@ export function readableBody(body: string, memories: readonly Pick<Memory, 'file
   return outsideCode(body, (prose) =>
     prose.replace(LINK, (_whole, slug: string) => {
       const title = byKey.get(slug)
-      return title ? `*« ${title} »*` : `*${slug} (introuvable)*`
+      return title ? `*${words.quote(title)}*` : `*${slug} (${words.notFound})*`
     })
   )
 }
@@ -357,10 +336,7 @@ export function readableBody(body: string, memories: readonly Pick<Memory, 'file
  * What is wrong with a memory just written, for a notification; null if nothing. « Not in the
  * index » is left out: Claude writes the memory first and its index line right after.
  */
-export function writeVerdict(m: Memory): string | null {
-  const parts: string[] = []
-  if (m.missingPaths.length) parts.push(`cite ${m.missingPaths.length > 1 ? `${m.missingPaths.length} fichiers introuvables` : 'un fichier introuvable'}`)
+export function writeDefects(m: Memory): { missing: number; dead: number } | null {
   const dead = m.problems.filter((p) => p.kind === 'dead-link').length
-  if (dead) parts.push(dead > 1 ? `${dead} liens vers rien` : 'un lien vers rien')
-  return parts.length ? parts.join(', ') : null
+  return m.missingPaths.length || dead ? { missing: m.missingPaths.length, dead } : null
 }

@@ -2,8 +2,9 @@
 // panel, keeps the status bar item current, hears agents read and write memories, and runs the
 // palette commands. It never writes a memory: fixing is handed to a new Claude.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, readableBody, toVerify, verifyCount, verifyPrompt, writeVerdict, type MemoryFile } from './audit.ts'
+import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, readableBody, toVerify, verifyCount, writeDefects, type MemoryFile } from './audit.ts'
 import { candidateSlugs, claudeCommand, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { langOf, systemLang, words, type Lang, type Words } from './i18n.ts'
 import type { PanelView, ProjectView } from './protocol.ts'
 import { memoryDir, presentOnDisk, projectsRoot, readCheckout, readGitFile, readMemory, readMemoryFolder, type CheckoutFacts } from './store.ts'
 
@@ -11,12 +12,30 @@ const STATUS = 'health'
 const unseenKey = (slug: string): string => `unseen:${slug}`
 const readsKey = (slug: string): string => `reads:${slug}`
 const sinceKey = (slug: string): string => `tracking:${slug}`
+const LANG_KEY = 'lang'
 /** Reads of one memory this close together are one reading (Claude reads long files in parts). */
 const SAME_READING_MS = 10 * 60_000
 /** Git answers are reused this long: one focus change fires several requests at once. */
 const GIT_TTL_MS = 5_000
 
 type Reads = ProjectView['reads']
+
+/**
+ * The language the worker speaks: Orca's, as the panel last told it (kept for the next run, so a
+ * notification before the panel opens speaks it too); the system's until then.
+ */
+let lang: Lang = systemLang()
+const t = (): Words => words(lang)
+async function heard(orca: OrcaWorkerApi, locale: string | undefined): Promise<void> {
+  if (!locale || langOf(locale) === lang) return
+  lang = langOf(locale)
+  await orca.storage.set(LANG_KEY, lang)
+  void (async () => {
+    const saved = await orca.storage.get(LANG_KEY)
+    if (saved === 'en' || saved === 'fr') lang = saved
+    await refreshStatus(orca)
+  })().catch(() => undefined)
+}
 
 /** Storage writes one after the other: hooks are not awaited, two may read-modify-write at once. */
 let queue: Promise<unknown> = Promise.resolve()
@@ -137,14 +156,13 @@ async function refreshStatus(orca: OrcaWorkerApi): Promise<void> {
     const count = verifyCount(p)
     const fresh = p.unseen.length
     const parts = [count ? `${count}` : '', fresh ? `+${fresh}` : ''].filter(Boolean)
-    const learned = fresh ? ` ${fresh} nouvelle${fresh > 1 ? 's' : ''} depuis ta dernière visite.` : ''
     await orca.host.call('statusBar.update', {
       id: STATUS,
       visible: true,
       icon: 'book',
       text: parts.join(' · ') || ' ',
       tone: count ? 'warning' : fresh ? 'accent' : 'success',
-      tooltip: `Mémoire de Claude (${p.label}) : ${count ? `${count} à vérifier.` : 'saine.'}${learned} Cliquer : afficher ou masquer la barre latérale.`
+      tooltip: t().statusTooltip(p.label, count, fresh)
     })
   } catch {
     // The status bar is the desktop app's: elsewhere it is simply not there.
@@ -154,11 +172,11 @@ async function refreshStatus(orca: OrcaWorkerApi): Promise<void> {
 /** Always a NEW Claude in its own terminal: an idle-looking agent may be a conversation in progress. */
 async function handOver(orca: OrcaWorkerApi): Promise<{ count: number; workspace: string }> {
   const { project: p, focused } = await view(orca)
-  if (!p || !focused) throw new Error('Ce workspace n’a aucune mémoire Claude.')
+  if (!p || !focused) throw new Error(t().noMemoryHere)
   const count = verifyCount(p)
-  if (count === 0) throw new Error('Rien à vérifier.')
-  const prompt = verifyPrompt(memoryDir(p.slug, await rootOf(orca)), toVerify(p), p.indexProblems)
-  await orca.host.call('terminal.create', { workspaceId: focused.id, title: 'Claude · mémoire', command: claudeCommand(prompt) })
+  if (count === 0) throw new Error(t().nothingToDo)
+  const prompt = t().prompt(memoryDir(p.slug, await rootOf(orca)), toVerify(p), p.indexProblems)
+  await orca.host.call('terminal.create', { workspaceId: focused.id, title: t().terminalTitle, command: claudeCommand(prompt) })
   return { count, workspace: focused.name }
 }
 
@@ -194,28 +212,34 @@ async function recordWrite(orca: OrcaWorkerApi, memory: { slug: string; file: st
   const checkout = all.find((w) => w.id === workspaceId)?.path ?? null
   const { repo } = checkout ? await repoFacts(checkout, files) : { repo: null }
   const written = audit(files, { ...DEFAULT_OPTIONS, repo }).memories.find((m) => m.file === memory.file)
-  const verdict = written ? writeVerdict(written) : null
+  const defects = written ? writeDefects(written) : null
   const title = written?.title ?? memory.file
   await orca.host
-    .call('notifications.show', verdict ? { title: 'Claude a retenu quelque chose, à revoir', body: `${title} : ${verdict}.` } : { title: 'Claude a retenu quelque chose', body: title })
+    .call('notifications.show', defects ? { title: t().learnedToReview, body: t().writeVerdict(title, defects) } : { title: t().learned, body: title })
     .catch(() => undefined)
   orca.panels.post('memory.changed', { slug: memory.slug, file: memory.file })
   await refreshStatus(orca)
 }
 
 export default function activate(orca: OrcaWorkerApi): void {
-  orca.panels.handle('memory.view', async () => {
+  lang = systemLang()
+  orca.panels.handle('memory.view', async (input) => {
+    await heard(orca, input?.locale)
     const { project, workspace, unmatched } = await view(orca)
     return unmatched ? { project, workspace, unmatched } : { project, workspace }
   })
 
-  orca.panels.handle('memory.read', async ({ slug, file }) => {
+  orca.panels.handle('memory.read', async ({ slug, file, locale }) => {
+    await heard(orca, locale)
     const root = await rootOf(orca)
     const files = await readMemoryFolder(slug, root)
-    return { body: readableBody(bodyOf(await readMemory(slug, file, root)), audit(files).memories) }
+    return { body: readableBody(bodyOf(await readMemory(slug, file, root)), audit(files).memories, t()) }
   })
 
-  orca.panels.handle('memory.verify', async () => handOver(orca))
+  orca.panels.handle('memory.verify', async (input) => {
+    await heard(orca, input?.locale)
+    return handOver(orca)
+  })
 
   orca.panels.handle('memory.seen', async ({ slug, files }) => {
     await serial(async () => {
@@ -228,7 +252,7 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   orca.commands.register('verify', async () => {
     const { count, workspace } = await handOver(orca)
-    return `Claude lancé dans « ${workspace} » avec ${count} élément${count > 1 ? 's' : ''} à vérifier.`
+    return t().commandStarted(workspace, count)
   })
   orca.commands.register('show', async () => {
     await orca.host.call('commands.run', { action: 'sidebar.right.toggle' })
@@ -260,5 +284,9 @@ export default function activate(orca: OrcaWorkerApi): void {
     return refreshStatus(orca)
   })
 
-  void refreshStatus(orca)
+  void (async () => {
+    const saved = await orca.storage.get(LANG_KEY)
+    if (saved === 'en' || saved === 'fr') lang = saved
+    await refreshStatus(orca)
+  })().catch(() => undefined)
 }

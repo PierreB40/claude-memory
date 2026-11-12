@@ -9,7 +9,7 @@ your workspace, checks it against the code, and hands the fixes to a new Claude.
 
 ![The Claude Memory panel in Orca, on a demo project](docs/images/panel.png)
 
-*Captured from the real panel on the demo project in `fixtures/`. The interface is in French.
+*Captured from the real panel on the demo project in `fixtures/`. In English or French, as Orca is.
 An independent project, not made or endorsed by Anthropic or Stably.*
 
 ## Install
@@ -34,17 +34,16 @@ Then open the **Claude Memory** panel in the right sidebar, or click the book in
 ## What it does
 
 **A panel that follows the focused workspace**, like Orca's own tabs: switch workspace and it
-switches project. A fixed header (project, branch, *Vérifier*, tabs, search, type filter) sits
+switches project. A fixed header (project, branch, *Verify*, tabs, search, type filter) sits
 over grouped lists:
 
-- **À vérifier** (*to verify*): the memories that are maybe no longer true. That covers cited files
-  found neither in the workspace nor on the default branch, dead `[[links]]`, links aimed at a file
-  name instead of a `name:`, memories missing from `MEMORY.md` (Claude never sees them), and index
-  lines pointing to nothing. A second group, not counted, holds the memories *to update when your
+- **To verify**: the memories that are maybe no longer true. That covers cited files found neither
+  in the workspace nor on the default branch, `[[links]]` that lead to no memory, memories missing
+  from `MEMORY.md` (Claude never sees them), and index lines pointing to nothing. A second group, not counted, holds the memories *to update when your
   branch merges*: they cite files your branch removed. The memory is shared by every worktree and
   still true on the default branch, so nothing changes before the merge.
-- **Récentes** (*recent*): what Claude wrote this week. New ones since your last visit come first.
-- **Toutes** (*all*): grouped by type (rules of work, project, references, profile), A to Z.
+- **Recent**: what Claude wrote this week. New ones since your last visit come first.
+- **All**: grouped by type (rules of work, project, references, profile), A to Z.
 
 **A memory opens in place.** You see:
 - what is wrong with it;
@@ -53,7 +52,7 @@ over grouped lists:
 - its file, whether it is in the index, and the paths it cites;
 - how often Claude read it.
 
-**Vérifier** starts a *new* Claude in a terminal of the workspace, with the request as its first
+**Verify** starts a *new* Claude in a terminal of the workspace, with the request as its first
 message. It fixes what is still useful and *proposes* deletions, never makes them alone. It never
 types into an existing terminal.
 
@@ -80,7 +79,10 @@ Clicking it shows or hides the sidebar.
 
   *Removed by your branch* means deleted or renamed between the branch's fork point
   (`git merge-base`) and now. A path whose first folder is no folder of the repository, such as an
-  npm package or a domain, is not judged.
+  npm package or a domain, is not judged. A path with a placeholder (`__tests__/[name].test.ts`,
+  `<app>/x.ts`, `migrations/NNNN_*.sql`) holds when a file fits it.
+- **Links.** `[[x]]` leads to the memory whose `name:` is `x`, or, as older memories link, whose
+  file is `x.md`.
 - **Reads and writes.** An `agent.tool.after` hook sees the tool calls of the agents running in
   Orca. It keeps only `Write`, `Edit`, `MultiEdit` and `Read` calls on a memory file, and never
   holds Orca up.
@@ -99,11 +101,13 @@ Clicking it shows or hides the sidebar.
 - **Two workspaces with the same name on the same branch** cannot be told apart: Orca tells a panel
   only the focused workspace's name and branch. The panel says so instead of guessing.
 - **Local workspaces only.** A workspace on an SSH host is read as if its path were local.
-- **POSIX shells.** *Vérifier* types `claude '…'` in a new terminal. That works in sh, bash, zsh and
+- **POSIX shells.** *Verify* types `claude '…'` in a new terminal. That works in sh, bash, zsh and
   fish, but not in PowerShell or cmd.
 - **The status bar toggles the sidebar, not this panel.** Orca gives plugins no way to show a given
   panel.
-- **French interface.** The panel, notifications and the request given to Claude are in French.
+- **English or French.** The panel, notifications and the request given to Claude follow Orca's
+  language; the worker learns it from the panel, so until a panel has opened once it speaks the
+  system's. Palette commands are in English: Orca does not translate a plugin's manifest.
 
 ## Without Orca
 

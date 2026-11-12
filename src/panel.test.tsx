@@ -38,10 +38,11 @@ const project = (memories: Memory[], over: Partial<ProjectView> = {}): ProjectVi
   ...over
 })
 
-function mountWith(answers: PanelView[], body = 'Le texte de la mémoire.') {
+function mountWith(answers: PanelView[], body = 'Le texte de la mémoire.', locale = 'fr-FR') {
   let i = 0
   const seen: unknown[] = []
   const view = mount(panel, {
+    locale,
     host: mockHost({
       requests: {
         'memory.view': () => answers[Math.min(i++, answers.length - 1)] as PanelView,
@@ -159,4 +160,16 @@ test('an open memory that disappears brings back the list', async () => {
 test('no workspace, or an ambiguous one, says which', async () => {
   assert.ok(drawn(await mountWith([{ project: null, workspace: null }]).view).includes('Aucun workspace ouvert'))
   assert.ok(drawn(await mountWith([{ project: null, workspace: 'main', unmatched: true }]).view).includes('Workspace « main » ambigu'))
+})
+
+test('in English when Orca is', async () => {
+  const stale = memory({ file: 'old.md', title: 'Old audit', cited: 2, missingPaths: ['x/a.vue'], problems: [{ kind: 'dead-link', link: 'gone' }] })
+  const v = await mountWith([{ project: project([stale]), workspace: 'analyze' }], 'Text.', 'en-US').view
+  const tree = drawn(v)
+  assert.ok(tree.includes('1 memory · feat/x'))
+  assert.ok(tree.includes('"To verify 1" selected'))
+  assert.ok(tree.includes('1/2 files not found · broken link'))
+  assert.ok(tree.includes('All types') && tree.includes('Verify'))
+  assert.deepEqual(v.errors, [])
+  await v.unmount()
 })

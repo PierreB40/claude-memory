@@ -16,7 +16,7 @@ declare module 'node:os' {
 declare module 'node:path' {
   export function join(...parts: string[]): string
 }
-declare const process: { argv: string[]; exitCode?: number; stdout: { write(s: string): boolean } }
+declare const process: { argv: string[]; env: Record<string, string | undefined>; exitCode?: number; stdout: { write(s: string): boolean } }
 declare module 'node:child_process' {
   export function execFileSync(file: string, args: readonly string[], options: { cwd?: string; encoding?: 'utf8' }): string
   export function execFile(

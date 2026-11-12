@@ -4,6 +4,11 @@
   "name": "Claude Memory",
   "version": "0.3.0",
   "description": "What Claude Code remembers about the project in front of you, and what no longer holds: memories citing deleted code, broken links, entries Claude cannot see. Read any memory in place; hand the fixes to a new Claude.",
+  "author": {
+    "name": "Pierre Blanchard",
+    "url": "https://github.com/PierreB40"
+  },
+  "repository": "https://github.com/PierreB40/claude-memory",
   "license": "MIT",
   "homepage": "https://github.com/PierreB40/claude-memory",
   "engines": {
@@ -34,11 +39,11 @@
     "commands": [
       {
         "id": "show",
-        "title": "Claude Memory : afficher ou masquer la barre latérale"
+        "title": "Claude Memory: Show or Hide the Sidebar"
       },
       {
         "id": "verify",
-        "title": "Claude Memory : faire vérifier la mémoire par Claude",
+        "title": "Claude Memory: Have Claude Verify the Memory",
         "when": "workspace"
       }
     ],
@@ -47,7 +52,7 @@
         "id": "health",
         "icon": "book",
         "text": " ",
-        "tooltip": "Mémoire de Claude",
+        "tooltip": "Claude’s memory",
         "command": "show"
       }
     ],

@@ -1,6 +1,6 @@
 ---
 name: stack
-description: Nuxt + Hono + Postgres — monorepo pnpm, Drizzle pour la base
+description: Nuxt + Hono + Postgres — a pnpm monorepo, Drizzle for the database
 metadata:
   type: reference
 ---
