@@ -145,6 +145,10 @@ npm run typecheck
 CI validates the manifest with Orca's own validator and runs the CLI on the fixtures. The tests
 need Orca's test kit, so run `npm test` locally before a pull request.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
+
 ## License
 
 [MIT](LICENSE)
