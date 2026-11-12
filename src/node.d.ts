@@ -1,0 +1,19 @@
+// The few Node APIs the worker and the CLI use; the plugin typings ship no @types/node.
+declare module 'node:fs/promises' {
+  export function readdir(path: string): Promise<string[]>
+  export function readFile(path: string, encoding: 'utf8'): Promise<string>
+  export function stat(path: string): Promise<{ mtimeMs: number; isDirectory(): boolean }>
+  export function mkdtemp(prefix: string): Promise<string>
+  export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>
+  export function writeFile(path: string, data: string): Promise<void>
+  export function utimes(path: string, atime: number, mtime: number): Promise<void>
+  export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>
+}
+declare module 'node:os' {
+  export function homedir(): string
+  export function tmpdir(): string
+}
+declare module 'node:path' {
+  export function join(...parts: string[]): string
+}
+declare const process: { argv: string[]; exitCode?: number; stdout: { write(s: string): boolean } }

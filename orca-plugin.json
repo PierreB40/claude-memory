@@ -1,0 +1,56 @@
+{
+  "manifestVersion": 2,
+  "id": "claude-memory",
+  "name": "Claude Memory",
+  "version": "0.1.0",
+  "description": "Audits Claude Code's auto-memory: broken [[links]], memories missing from MEMORY.md, duplicates, an index too long to load, project memories to reread.",
+  "engines": {
+    "orca": ">=1.4.248"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "claude-memory",
+        "title": "Claude Memory",
+        "icon": "book",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ],
+    "settings": [
+      {
+        "key": "projectsRoot",
+        "title": "Claude projects folder",
+        "description": "Leave empty for ~/.claude/projects.",
+        "type": "string",
+        "default": ""
+      },
+      {
+        "key": "staleDays",
+        "title": "Reread project memories older than (days)",
+        "type": "integer",
+        "default": 60
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "settings:own"
+    },
+    {
+      "kind": "workspace:read"
+    },
+    {
+      "kind": "agent:read"
+    },
+    {
+      "kind": "terminal:send"
+    },
+    {
+      "kind": "agent:launch"
+    }
+  ]
+}
