@@ -21,7 +21,7 @@ if (!slug) {
   }
   const result = audit(files, { ...DEFAULT_OPTIONS, repo })
   const items = toVerify(result)
-  out(`${result.memories.length} mémoires · MEMORY.md ${result.index.lines} lignes · ${facts ? `code vérifié sur ${facts.branch ?? '?'}` : 'code non vérifié (passer le dépôt)'}`)
+  out(`${result.memories.length} mémoire${result.memories.length > 1 ? 's' : ''} · MEMORY.md ${result.index.lines} lignes · ${facts ? `code vérifié sur ${facts.branch ?? '?'}` : 'code non vérifié (passer le dépôt)'}`)
   out(`${items.length + result.indexProblems.length} à vérifier`)
   for (const text of result.indexProblems) out(`  ✖ ${text}`)
   for (const m of items) {

@@ -4,6 +4,8 @@
   "name": "Claude Memory",
   "version": "0.3.0",
   "description": "What Claude Code remembers about the project in front of you, and what no longer holds: memories citing deleted code, broken links, entries Claude cannot see. Read any memory in place; hand the fixes to a new Claude.",
+  "license": "MIT",
+  "homepage": "https://github.com/PierreB40/claude-memory",
   "engines": {
     "orca": ">=1.4.248"
   },

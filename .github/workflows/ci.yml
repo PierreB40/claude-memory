@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  # The Orca commit whose plugin validator checks the manifest. Bump it deliberately.
+  ORCA_REF: 81ec82b3651703f6ab3ba1a74b729453919e69e5
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: stablyai/orca
+          ref: ${{ env.ORCA_REF }}
+          path: orca
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: orca/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: orca/pnpm-lock.yaml
+
+      # The validator needs only Orca's JavaScript packages, not Electron.
+      - name: Install Orca's validator
+        working-directory: orca
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm run build:packages
+
+      - name: Validate the manifest the way Orca loads it
+        working-directory: orca
+        run: pnpm validate:plugin "$GITHUB_WORKSPACE/plugin"
+
+      - name: Tag matches the manifest version
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: plugin
+        run: test "v$(node -p "require('./orca-plugin.json').version")" = "$GITHUB_REF_NAME"
+
+  audit:
+    # The audit and git logic, through the CLI, on the fixtures: no Orca needed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: A sound memory passes, a broken one fails
+        run: |
+          home="$(mktemp -d)"
+          mkdir -p "$home/.claude"
+          ln -s "$PWD/fixtures/projects" "$home/.claude/projects"
+          HOME="$home" node src/cli.ts -demo-ok
+          if HOME="$home" node src/cli.ts -demo-broken; then echo "expected the broken memory to fail"; exit 1; fi

@@ -4,7 +4,7 @@ import { defineCheck } from 'orca/testing'
 
 const root = new URL('../fixtures/projects', import.meta.url).pathname
 const workspaces = {
-  workspaces: ['broken', 'ok', 'other'].map((name) => ({ id: `w-${name}`, kind: 'worktree', name, path: `/demo/${name}`, branch: 'refs/heads/main', hostId: null })),
+  workspaces: ['broken', 'ok', 'other', 'shop'].map((name) => ({ id: `w-${name}`, kind: 'worktree', name, path: `/demo/${name}`, branch: 'refs/heads/main', hostId: null })),
   truncated: false
 }
 const focus = (name: string | null) => ({
@@ -20,5 +20,6 @@ export default defineCheck({
   toVerify: focus('broken'),
   sound: focus('ok'),
   noMemory: focus('other'),
-  noWorkspace: focus(null)
+  noWorkspace: focus(null),
+  demo: focus('shop')
 })

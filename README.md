@@ -1,93 +1,142 @@
-# Claude Memory — Orca plugin
+# Claude Memory for Orca
 
-What Claude Code remembers about the project you are working on, and what no longer holds.
+**What Claude Code remembers about the project in front of you, and what no longer holds.**
 
-Claude Code writes memories on its own (`~/.claude/projects/<project>/memory/`) and reads them
-at every session. Nobody rereads them; the code moves on, and a memory describing deleted files
-keeps steering the agent.
+Claude Code writes memories on its own (`~/.claude/projects/<project>/memory/`) and loads them at
+every session. Nobody rereads them. The code moves on, and a memory describing deleted files keeps
+steering the agent. This [Orca](https://github.com/stablyai/orca) plugin puts that memory beside
+your workspace, checks it against the code, and hands the fixes to a new Claude.
+
+![The Claude Memory panel in Orca, on a demo project](docs/images/panel.png)
+
+*Captured from the real panel on the demo project in `fixtures/`. The interface is in French.
+An independent project, not made or endorsed by Anthropic or Stably.*
+
+## Install
+
+Requirements: Orca **1.4.248** or newer, [Claude Code](https://claude.com/claude-code), `git`, and
+local workspaces on macOS or Linux.
+
+In Orca, open **Settings → Plugins → Add plugin → From Git URL** and enter:
+
+```text
+https://github.com/PierreB40/claude-memory#v0.3.0
+```
+
+or from a terminal: `orca plugin install PierreB40/claude-memory@v0.3.0`.
+
+Then open the **Claude Memory** panel in the right sidebar, or click the book in the status bar.
+
+> **Trust matters.** This is a trusted worker: it runs in a Node process with your user account's
+> access. It reads memory folders, runs `git` in your workspaces, and never writes a memory itself.
+> Review the access Orca lists before approving.
 
 ## What it does
 
-**A sidebar panel that follows the focused workspace**, like Orca's own tabs: switch workspace,
-it switches project. A fixed header (project, branch, *Verify*, tabs, search, type filter) over
-grouped lists:
+**A panel that follows the focused workspace**, like Orca's own tabs: switch workspace and it
+switches project. A fixed header (project, branch, *Vérifier*, tabs, search, type filter) sits
+over grouped lists:
 
-- **To verify** — *maybe no longer true*: cited files found neither in the workspace nor on the
-  default branch, dead `[[links]]`, links aimed at a file name instead of a `name:`, memories
-  missing from `MEMORY.md` (Claude never sees them), and index problems. Then, apart and not
-  counted, *to update when your branch merges*: memories citing files your branch removed since
-  it left the default branch. The memory is shared by every worktree and still true on the
-  default branch, so nothing is to change before the merge.
-- **Recent** — what Claude wrote this week: new since your last visit, then earlier.
-- **All** — by type (rules of work, project, references, profile), A to Z.
+- **À vérifier** (*to verify*): the memories that are maybe no longer true. That covers cited files
+  found neither in the workspace nor on the default branch, dead `[[links]]`, links aimed at a file
+  name instead of a `name:`, memories missing from `MEMORY.md` (Claude never sees them), and index
+  lines pointing to nothing. A second group, not counted, holds the memories *to update when your
+  branch merges*: they cite files your branch removed. The memory is shared by every worktree and
+  still true on the default branch, so nothing changes before the merge.
+- **Récentes** (*recent*): what Claude wrote this week. New ones since your last visit come first.
+- **Toutes** (*all*): grouped by type (rules of work, project, references, profile), A to Z.
 
-**A memory opens in place**: what is wrong with it, its text (`[[links]]` read as the titles
-they name), what it points to and what points to it, then its file, whether it is in the index,
-its cited paths, and **how often Claude read it**.
+**A memory opens in place.** You see:
+- what is wrong with it;
+- its text, with `[[links]]` read as the titles they name;
+- what it points to, and what points to it;
+- its file, whether it is in the index, and the paths it cites;
+- how often Claude read it.
 
-**Verify** starts a *new* Claude in a terminal of the workspace, the request as its first
-message (`claude '<request>'`): it fixes what is still useful and *proposes* deletions, never
-makes them alone. It never types into an existing terminal.
+**Vérifier** starts a *new* Claude in a terminal of the workspace, with the request as its first
+message. It fixes what is still useful and *proposes* deletions, never makes them alone. It never
+types into an existing terminal.
 
-**When Claude writes a memory**, a notification says so — and says right away if it cites a
-file missing from the agent's workspace, links to nothing, or is missing from the index.
+**When Claude writes a memory**, a notification says so. It warns right away if the memory cites
+a file missing from the agent's workspace or links to nothing.
 
-**The status bar** shows the health of the focused project's memory: orange with the count to
-verify, green when sound, `+n` for new ones. Clicking it shows or hides the sidebar.
+**The status bar** shows the health of the focused project's memory:
+- orange with the count to verify;
+- green when sound;
+- `+n` for new memories.
 
-**The palette** has *show or hide the sidebar* and *have Claude verify the memory*.
+Clicking it shows or hides the sidebar.
 
 ## How it knows
 
 - **Project.** Claude Code files the memory under the main checkout, so every worktree of a
-  repository shares one memory. The panel finds it from the focused workspace (a linked
-  worktree's `.git` file leads to its main checkout).
-- **Code.** A cited path holds if it is in the focused workspace (working tree included:
-  `git ls-files --cached --others --exclude-standard`, minus deleted files), on the default
-  branch's tip (`origin/HEAD`, else `main`), or on disk though git ignores it (`.env`). *Removed
-  by your branch* means deleted or renamed between the branch's fork point (`git merge-base`)
-  and now. A path whose first folder is no folder of the repository (an npm package, a domain)
-  is not judged. Git answers are reused for 5 s.
-- **Reads and writes.** An `agent.tool.after` hook sees every tool call of the agents running in
-  Orca; it keeps only `Write`/`Edit`/`MultiEdit` and `Read` calls on a memory file, and never
-  holds Orca up. Writing `MEMORY.md` refreshes without a notification. A notification never says
-  « not in the index »: Claude writes the memory first, its index line right after.
+  repository shares one memory. The panel finds it from the focused workspace: a linked
+  worktree's `.git` file leads to its main checkout.
+- **Code.** A cited path holds if any of these is true:
+  - it is in the focused workspace, working tree included (`git ls-files --cached --others
+    --exclude-standard`, minus deleted files);
+  - it is on the default branch's tip (`origin/HEAD`, else `main`);
+  - it is on disk, though git ignores it (`.env`).
+
+  *Removed by your branch* means deleted or renamed between the branch's fork point
+  (`git merge-base`) and now. A path whose first folder is no folder of the repository, such as an
+  npm package or a domain, is not judged.
+- **Reads and writes.** An `agent.tool.after` hook sees the tool calls of the agents running in
+  Orca. It keeps only `Write`, `Edit`, `MultiEdit` and `Read` calls on a memory file, and never
+  holds Orca up.
 
 ## Limits
 
-- **Read counts are a minimum, and a reading is a visit.** Reads of one memory less than ten
-  minutes apart count once (Claude reads long files in parts). Only reads through Claude Code's `Read` tool are counted. A
-  memory opened another way (`cat`, `grep`, `head` in a shell, an agent outside Orca, a session
-  over SSH or WSL) is not. Counting starts when the plugin first sees the project: « never read
-  since <date> » says nothing about before that date.
-- **Memories Claude loads by itself are not reads.** `MEMORY.md` is loaded at every session
-  without a tool call, so it is never counted, and neither is anything Claude Code injects
-  automatically.
+- **Read counts are a minimum.**
+  - Reads of one memory less than ten minutes apart count once, because Claude reads long files in
+    parts.
+  - Only reads through Claude Code's `Read` tool, by an agent running in Orca, are counted. A memory
+    opened by `cat` or `grep`, or read in a session outside Orca, is not.
+  - Counting starts when the plugin first sees the project.
+  - `MEMORY.md` is loaded at every session without a tool call, so it is never counted.
 - **Code checks see the focused workspace and the default branch.** A file that exists only on a
   third branch reads as missing.
-- **Two workspaces with the same name on the same branch** cannot be told apart: Orca gives a
-  panel only the focused workspace's name and branch. The panel says so instead of guessing.
+- **Two workspaces with the same name on the same branch** cannot be told apart: Orca tells a panel
+  only the focused workspace's name and branch. The panel says so instead of guessing.
 - **Local workspaces only.** A workspace on an SSH host is read as if its path were local.
-- **POSIX shells.** *Verify* types `claude '…'` in a new terminal: fine in sh, bash, zsh, fish;
-  not in PowerShell or cmd.
-- **A failed write** leaves no file and is ignored; a write that failed after creating it is not
-  told apart.
-- **The status bar shows or hides the sidebar, not this panel**: Orca gives plugins no way to show a
-  given panel.
-- **No clipboard**: Orca panels cannot copy a path.
+- **POSIX shells.** *Vérifier* types `claude '…'` in a new terminal. That works in sh, bash, zsh and
+  fish, but not in PowerShell or cmd.
+- **The status bar toggles the sidebar, not this panel.** Orca gives plugins no way to show a given
+  panel.
+- **French interface.** The panel, notifications and the request given to Claude are in French.
 
-## Use
+## Without Orca
+
+The same audit runs in a terminal:
 
 ```bash
-orca plugin dev watch . --check                  # load it in Orca (asks approval once)
-orca plugin test .                               # tests
-node src/cli.ts                                  # projects with memories, no Orca needed
-node src/cli.ts -Users-me-Dev-app ~/Dev/app      # what to verify; exit 1 when anything is
+node src/cli.ts                                  # projects that have memories
+node src/cli.ts -Users-me-Dev-app ~/Dev/app      # what to verify; exits 1 when anything is
 ```
 
-Setting: `projectsRoot` (default `~/.claude/projects`).
+## Develop
 
-Access asked: a Node worker on your machine (reads the memory folders, runs `git`), its own
-settings and storage (what you saw, read counts), the focused workspace (to follow it), opening
-the sidebar (status bar), typing in a new terminal (to start Claude), notifications. The panel
-never writes a memory.
+```bash
+npm run setup      # writes Orca's plugin typings into .orca/types
+npm run dev        # loads the folder into Orca and reloads on save (asks approval once)
+npm test           # the tests, with Orca's test kit
+npm run check      # validates, and renders the panel once per scenario in src/panel.check.ts
+npm run typecheck
+```
+
+| Path | What it is |
+| --- | --- |
+| `src/audit.ts` | The pure audit: frontmatter, links, index, cited paths, verdicts |
+| `src/detect.ts` | Which project a workspace or a tool call is about |
+| `src/store.ts` | Memory folders and `git`, read-only |
+| `src/worker.ts` | The worker: requests, the hook, the status bar, notifications |
+| `src/panel.tsx` | The panel, in Orca components |
+| `src/protocol.ts` | The typed contract between panel and worker |
+| `fixtures/projects/` | Demo memories used by the tests, the checks and the screenshot |
+
+CI validates the manifest with Orca's own validator and runs the CLI on the fixtures. The tests
+need Orca's test kit, so run `npm test` locally before a pull request.
+
+## License
+
+[MIT](LICENSE)

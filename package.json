@@ -1,0 +1,21 @@
+{
+  "name": "claude-memory",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "An Orca plugin: what Claude Code remembers about your project, and what no longer holds.",
+  "license": "MIT",
+  "repository": "https://github.com/PierreB40/claude-memory",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "setup": "orca plugin types .",
+    "test": "orca plugin test .",
+    "check": "orca plugin check .",
+    "validate": "orca plugin validate .",
+    "typecheck": "npx -y -p typescript@5.9.3 tsc --noEmit -p .",
+    "audit": "node src/cli.ts",
+    "dev": "orca plugin dev watch . --check"
+  }
+}
