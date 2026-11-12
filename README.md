@@ -1,5 +1,7 @@
 # Claude Memory for Orca
 
+[![CI](https://github.com/PierreB40/claude-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/PierreB40/claude-memory/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **What Claude Code remembers about the project in front of you, and what no longer holds.**
 
 Claude Code writes memories on its own (`~/.claude/projects/<project>/memory/`) and loads them at
