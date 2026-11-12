@@ -19,12 +19,15 @@ export interface ProjectView extends Audit {
 
 /**
  * What the panel shows. `workspace` is the focused workspace's name (null: none); `unmatched`
- * when Orca's context fits no single workspace (two of the same name on the same branch).
+ * when Orca's context fits no single workspace (two of the same name on the same branch, and
+ * no agent event yet tied one of its terminals to one of them).
  */
 export interface PanelView {
   project: ProjectView | null
   workspace: string | null
   unmatched?: boolean
+  /** The focused workspace is on WSL or SSH: its memory is there, out of the plugin's reach. */
+  remote?: boolean
 }
 
 /** Orca's language (BCP-47), which only panels know: the worker speaks it from then on. */
@@ -46,5 +49,7 @@ declare module 'orca' {
   interface PluginPanelEvents {
     /** Claude wrote a memory (or the index) of this project: open panels reload it. */
     'memory.changed': { slug: string; file: string }
+    /** A terminal of the focused workspace was tied to it: the panel may now know which it is. */
+    'focus.resolved': Record<string, never>
   }
 }

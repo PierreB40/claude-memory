@@ -4,7 +4,7 @@ import * as main from './worker'
 
 const root = new URL('../fixtures/projects', import.meta.url).pathname
 /** Workspaces whose paths Claude Code names `-demo-broken` and `-demo-ok` (not git checkouts). */
-const ws = (name: string, id = `w-${name}`) => ({ id, kind: 'worktree', name, path: `/demo/${name}`, branch: 'refs/heads/main', hostId: null })
+const ws = (name: string, id = `w-${name}`) => ({ id, kind: 'worktree', name, path: `/demo/${name}`, branch: 'refs/heads/main', hostId: null as string | null })
 const host = (focus: string | null, results: Record<string, unknown> = {}, workspaces = [ws('broken'), ws('ok'), ws('other')]) =>
   mockHost({
     settings: { projectsRoot: root },
@@ -63,6 +63,25 @@ test('no memory, no workspace, or an ambiguous one: says which, never shows anot
   const twins = await mountWorker(main, { host: host('ok', {}, [ws('ok', 'a'), ws('ok', 'b')]) })
   assert.deepEqual(await twins.request('memory.view'), { project: null, workspace: 'ok', unmatched: true })
   await twins.deactivate()
+})
+
+test('two workspaces of one name: an agent status ties the focused terminal to one of them', async () => {
+  const twins = [{ ...ws('ok', 'a'), path: '/demo/broken' }, { ...ws('ok', 'b'), path: '/demo/ok' }]
+  const h = host('ok', { 'workspace.readContext': { branch: 'main', displayName: 'ok', terminals: [{ id: 't1' }] } }, twins)
+  const worker = await mountWorker(main, { host: h })
+  assert.equal((await worker.request('memory.view')).unmatched, true)
+  await worker.emit('agent.status.changed', { workspaceId: 'b', paneKey: 'p', terminalId: 't1', state: 'working', receivedAt: Date.now() })
+  assert.equal((await worker.request('memory.view')).project?.slug, '-demo-ok')
+  await worker.deactivate()
+})
+
+test('a workspace on another host: said as such, never « remembers nothing »', async () => {
+  const wsl = await mountWorker(main, { host: host('ok', {}, [{ ...ws('ok'), hostId: 'wsl:Ubuntu' }]) })
+  assert.deepEqual(await wsl.request('memory.view'), { project: null, workspace: 'ok', remote: true })
+  await wsl.deactivate()
+  const here = await mountWorker(main, { host: host('ok', {}, [{ ...ws('ok'), hostId: 'local' }]) })
+  assert.equal((await here.request('memory.view')).project?.slug, '-demo-ok')
+  await here.deactivate()
 })
 
 test('reads one memory without its header, and refuses a path out of the folder', async () => {

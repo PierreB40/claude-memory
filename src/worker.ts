@@ -3,7 +3,9 @@
 // palette commands. It never writes a memory: fixing is handed to a new Claude.
 import type { OrcaWorkerApi } from 'orca/worker'
 import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, readableBody, toVerify, verifyCount, writeDefects, type MemoryFile } from './audit.ts'
-import { candidateSlugs, claudeCommand, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { homedir, platform } from 'node:os'
+import { join } from 'node:path'
+import { candidateSlugs, isRemote, launchOf, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
 import { langOf, systemLang, words, type Lang, type Words } from './i18n.ts'
 import type { PanelView, ProjectView } from './protocol.ts'
 import { memoryDir, presentOnDisk, projectsRoot, readCheckout, readGitFile, readMemory, readMemoryFolder, type CheckoutFacts } from './store.ts'
@@ -49,7 +51,31 @@ async function rootOf(orca: OrcaWorkerApi): Promise<string> {
   const setting = await orca.settings.get('projectsRoot')
   const value = typeof setting === 'string' ? setting.trim() : ''
   if (!value) return projectsRoot()
-  return value.startsWith('~/') ? `${projectsRoot().replace(/\/\.claude\/projects$/, '')}/${value.slice(2)}` : value
+  return /^~[/\\]/.test(value) ? join(homedir(), value.slice(2)) : value
+}
+
+/**
+ * Which workspace each terminal belongs to, as agent events tell it: what tells two workspaces of
+ * the same name on the same branch apart. Kept for the next run, the newest ones only.
+ */
+const OWNERS_KEY = 'terminals'
+const MAX_OWNERS = 500
+const owners = new Map<string, string>()
+async function loadOwners(orca: OrcaWorkerApi): Promise<void> {
+  const saved = await orca.storage.get(OWNERS_KEY)
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return
+  for (const [terminal, workspace] of Object.entries(saved)) {
+    if (typeof workspace === 'string' && !owners.has(terminal)) owners.set(terminal, workspace)
+  }
+}
+/** True when this is news: the terminal was unknown, or moved. */
+function learnOwner(orca: OrcaWorkerApi, terminalId: string | undefined, workspaceId: string | null): boolean {
+  if (!terminalId || !workspaceId || owners.get(terminalId) === workspaceId) return false
+  owners.delete(terminalId)
+  owners.set(terminalId, workspaceId)
+  while (owners.size > MAX_OWNERS) owners.delete(owners.keys().next().value as string)
+  void serial(() => orca.storage.set(OWNERS_KEY, Object.fromEntries(owners))).catch(() => undefined)
+  return true
 }
 
 interface Known extends WorkspaceInfo {
@@ -63,8 +89,9 @@ async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known |
     orca.host.call('workspace.list').catch(() => ({ workspaces: [] }))
   ])
   if (!ctx) return { focused: null, name: null, all }
-  const match = matchWorkspace(ctx, all)
-  return { focused: match ? { ...match, gitFile: await readGitFile(match.path) } : null, name: ctx.displayName, all }
+  const match = matchWorkspace(ctx, all, owners)
+  const gitFile = match && !isRemote(match) ? await readGitFile(match.path) : null
+  return { focused: match ? { ...match, gitFile } : null, name: ctx.displayName, all }
 }
 
 const gitCache = new Map<string, { at: number; facts: Promise<CheckoutFacts | null> }>()
@@ -114,6 +141,7 @@ const lastSegment = (path: string): string => path.split('/').filter(Boolean).po
 async function view(orca: OrcaWorkerApi): Promise<PanelView & { focused: Known | null }> {
   const { focused, name } = await focusedWorkspace(orca)
   if (!focused) return { project: null, workspace: name, unmatched: name !== null, focused: null }
+  if (isRemote(focused)) return { project: null, workspace: focused.name, remote: true, focused }
   const root = await rootOf(orca)
   let slug: string | null = null
   let files: MemoryFile[] = []
@@ -169,6 +197,15 @@ async function refreshStatus(orca: OrcaWorkerApi): Promise<void> {
   }
 }
 
+/** The focused workspace's terminals, from the last `workspace.changed`. */
+let focusedTerminals = new Set<string>()
+/** A terminal of the focused workspace was just tied to it: an ambiguous focus may now be known. */
+async function focusMayHaveResolved(orca: OrcaWorkerApi, terminalId: string | undefined): Promise<void> {
+  if (!terminalId || !focusedTerminals.has(terminalId)) return
+  orca.panels.post('focus.resolved', {})
+  await refreshStatus(orca)
+}
+
 /** Always a NEW Claude in its own terminal: an idle-looking agent may be a conversation in progress. */
 async function handOver(orca: OrcaWorkerApi): Promise<{ count: number; workspace: string }> {
   const { project: p, focused } = await view(orca)
@@ -176,7 +213,10 @@ async function handOver(orca: OrcaWorkerApi): Promise<{ count: number; workspace
   const count = verifyCount(p)
   if (count === 0) throw new Error(t().nothingToDo)
   const prompt = t().prompt(memoryDir(p.slug, await rootOf(orca)), toVerify(p), p.indexProblems)
-  await orca.host.call('terminal.create', { workspaceId: focused.id, title: t().terminalTitle, command: claudeCommand(prompt) })
+  const launch = launchOf(platform(), focused.id, t().terminalTitle, prompt)
+  const { terminalId } =
+    launch.method === 'agent.launch' ? await orca.host.call('agent.launch', launch.params) : await orca.host.call('terminal.create', launch.params)
+  learnOwner(orca, terminalId, focused.id)
   return { count, workspace: focused.name }
 }
 
@@ -225,8 +265,8 @@ export default function activate(orca: OrcaWorkerApi): void {
   lang = systemLang()
   orca.panels.handle('memory.view', async (input) => {
     await heard(orca, input?.locale)
-    const { project, workspace, unmatched } = await view(orca)
-    return unmatched ? { project, workspace, unmatched } : { project, workspace }
+    const { project, workspace, unmatched, remote } = await view(orca)
+    return { project, workspace, ...(unmatched ? { unmatched } : {}), ...(remote ? { remote } : {}) }
   })
 
   orca.panels.handle('memory.read', async ({ slug, file, locale }) => {
@@ -261,6 +301,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   // Every tool call of every agent passes here; only reads and writes of a memory file matter.
   // Orca does not wait for an after-hook: the work runs on its own and never holds Orca up.
   orca.hooks.on('agent.tool.after', (event) => {
+    if (learnOwner(orca, event.terminalId, event.workspaceId)) void focusMayHaveResolved(orca, event.terminalId)
     const written = writtenPath(event.tool, event.input)
     const consulted = written ? null : readPath(event.tool, event.input)
     if (!written && !consulted) return
@@ -275,18 +316,25 @@ export default function activate(orca: OrcaWorkerApi): void {
     })().catch(() => undefined)
   })
 
-  // A new focused workspace may be another project; terminal opens and closes are not.
+  // A new focused workspace may be another project, even under the same name and branch (two
+  // `main` checkouts): its terminals tell. Only the same terminals are surely the same workspace.
   let last: string | undefined
   orca.events.on('workspace.changed', ({ context }) => {
-    const key = context ? `${context.displayName}\u0000${context.branch}` : ''
+    focusedTerminals = new Set(context?.terminals.map((t) => t.id) ?? [])
+    const key = context ? [context.displayName, context.branch, ...context.terminals.map((t) => t.id).sort()].join('\u0000') : ''
     if (key === last) return
     last = key
     return refreshStatus(orca)
+  })
+  // Every agent status tells which workspace its terminal is in.
+  orca.events.on('agent.status.changed', ({ terminalId, workspaceId }) => {
+    if (learnOwner(orca, terminalId, workspaceId)) return focusMayHaveResolved(orca, terminalId)
   })
 
   void (async () => {
     const saved = await orca.storage.get(LANG_KEY)
     if (saved === 'en' || saved === 'fr') lang = saved
+    await loadOwners(orca)
     await refreshStatus(orca)
   })().catch(() => undefined)
 }

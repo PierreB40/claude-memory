@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Two workspaces of the same name on the same branch (every repository's main checkout is
+  `main` on `main`) are told apart by their terminals: once an agent runs in one, the panel and
+  the status bar know which workspace is in front. Switching between two of them reloads the panel.
+- A workspace on WSL or over SSH says it is on another host, instead of « Claude remembers nothing ».
+- Windows: memories written with `\` paths are heard, worktrees with a `C:/…` gitdir find their
+  main checkout's memory, `~\` works in the projects folder setting, and *Verify* has Orca launch
+  Claude rather than typing a POSIX-quoted command into PowerShell or cmd.
+- New permissions: `agent:read` (agent statuses tie terminals to workspaces) and `agent:launch`
+  (*Verify* on Windows).
+
 ## 0.3.0
 
 The first public release.

@@ -32,6 +32,7 @@ export interface Words {
   noWorkspace: { title: string; description: string }
   ambiguous(workspace: string): { title: string; description: string }
   nothingLearned(workspace: string): { title: string; description: string }
+  remote(workspace: string): { title: string; description: string }
   summary(memories: number, branch: string | null): string
   verify: string
   verifyStarting: string
@@ -142,8 +143,9 @@ const fr: Words = {
   readFailed: 'Lecture impossible',
   readFailedBody: (e) => `_Lecture impossible : ${e}_`,
   noWorkspace: { title: 'Aucun workspace ouvert', description: 'La mémoire suit le workspace au premier plan.' },
-  ambiguous: (w) => ({ title: `Workspace « ${w} » ambigu`, description: 'Plusieurs workspaces portent ce nom sur la même branche : Orca ne dit pas lequel est au premier plan.' }),
+  ambiguous: (w) => ({ title: `Workspace « ${w} » ambigu`, description: 'Plusieurs workspaces portent ce nom sur la même branche, et Orca ne dit pas lequel est au premier plan. Lance Claude dans un de ses terminaux : le panneau le reconnaîtra.' }),
   nothingLearned: (w) => ({ title: `Claude n’a rien retenu sur « ${w} »`, description: 'Ses mémoires apparaîtront ici dès qu’il en écrira une.' }),
+  remote: (w) => ({ title: `« ${w} » est sur un autre hôte`, description: 'Sur WSL ou en SSH, le code et la mémoire de Claude restent sur cet hôte : le plugin ne les lit pas encore.' }),
   summary: (n, branch) => `${count(n, 'mémoire', 'mémoires')} · ${branch ?? 'code non vérifié'}`,
   verify: 'Vérifier',
   verifyStarting: 'Lancement…',
@@ -258,8 +260,9 @@ const en: Words = {
   readFailed: 'Could not read',
   readFailedBody: (e) => `_Could not read: ${e}_`,
   noWorkspace: { title: 'No workspace open', description: 'The memory follows the focused workspace.' },
-  ambiguous: (w) => ({ title: `Workspace “${w}” is ambiguous`, description: 'Several workspaces have this name on the same branch: Orca does not say which one is focused.' }),
+  ambiguous: (w) => ({ title: `Workspace “${w}” is ambiguous`, description: 'Several workspaces have this name on the same branch, and Orca does not say which one is focused. Start Claude in one of its terminals: the panel will know it.' }),
   nothingLearned: (w) => ({ title: `Claude remembers nothing about “${w}”`, description: 'Its memories will show here as soon as it writes one.' }),
+  remote: (w) => ({ title: `“${w}” is on another host`, description: 'On WSL or over SSH, the code and Claude’s memory stay on that host: the plugin does not read them yet.' }),
   summary: (n, branch) => `${count(n, 'memory', 'memories')} · ${branch ?? 'code not checked'}`,
   verify: 'Verify',
   verifyStarting: 'Starting…',

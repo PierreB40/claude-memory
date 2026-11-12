@@ -101,11 +101,15 @@ Clicking it shows or hides the sidebar.
   - `MEMORY.md` is loaded at every session without a tool call, so it is never counted.
 - **Code checks see the focused workspace and the default branch.** A file that exists only on a
   third branch reads as missing.
-- **Two workspaces with the same name on the same branch** cannot be told apart: Orca tells a panel
-  only the focused workspace's name and branch. The panel says so instead of guessing.
-- **Local workspaces only.** A workspace on an SSH host is read as if its path were local.
-- **POSIX shells.** *Verify* types `claude '…'` in a new terminal. That works in sh, bash, zsh and
-  fish, but not in PowerShell or cmd.
+- **Two workspaces with the same name on the same branch** (every main checkout is `main` on
+  `main`) are told apart only by their terminals. Orca tells a panel only the focused workspace's
+  name, branch and terminals, so the panel knows which one it is once an agent has run in one of
+  them. Until then, it says so instead of guessing.
+- **Local workspaces only.** On WSL or over SSH, the code and Claude's memory stay on that host.
+  The panel says so; Orca does not hook those agents yet either.
+- **Verify on Windows.** On macOS and Linux, *Verify* passes the request on the command line
+  (`claude '…'`). On Windows, where terminals are PowerShell or cmd, Orca launches Claude and sends
+  the request once it is ready.
 - **The status bar toggles the sidebar, not this panel.** Orca gives plugins no way to show a given
   panel.
 - **English or French.** The panel, notifications and the request given to Claude follow Orca's
