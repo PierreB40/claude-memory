@@ -80,26 +80,21 @@ function git(cwd: string, args: readonly string[]): Promise<string | null> {
 }
 const nulSplit = (out: string): string[] => out.split('\0').filter(Boolean)
 
-/**
- * The files of a checkout as they are NOW: tracked and new (not ignored) files, minus those
- * deleted from the working tree. Null when the folder is not a git checkout.
- */
-export async function trackedFiles(checkout: string): Promise<string[] | null> {
-  const [present, deleted] = await Promise.all([
-    git(checkout, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']),
-    git(checkout, ['ls-files', '-z', '--deleted'])
-  ])
-  if (present === null) return null
-  const gone = new Set(nulSplit(deleted ?? ''))
-  return [...new Set(nulSplit(present))].filter((f) => !gone.has(f))
+/** What git says about a checkout: its branch, its files now, the default branch's, what it removed. */
+export interface CheckoutFacts {
+  branch: string | null
+  /** The default branch compared with; null on it, or when there is none. */
+  base: string | null
+  /** Tracked and new (not ignored) files of the working tree, deleted ones left out. */
+  files: string[]
+  /** Files of the default branch's tip: a memory citing one is still true there. */
+  baseFiles: string[]
+  /** Deleted or renamed since the branch left the default branch, working tree included. */
+  removed: string[]
 }
 
-export async function currentBranch(checkout: string): Promise<string | null> {
-  return (await git(checkout, ['rev-parse', '--abbrev-ref', 'HEAD']))?.trim() || null
-}
-
-/** The default branch to compare against: origin/HEAD, else origin/main, else main. */
-export async function baseRef(checkout: string): Promise<string | null> {
+/** The default branch: origin/HEAD, else origin/main, main, origin/master, master. */
+async function baseRef(checkout: string): Promise<string | null> {
   const head = (await git(checkout, ['rev-parse', '--abbrev-ref', 'origin/HEAD']))?.trim()
   if (head && head !== 'origin/HEAD') return head
   for (const ref of ['origin/main', 'main', 'origin/master', 'master']) {
@@ -108,9 +103,47 @@ export async function baseRef(checkout: string): Promise<string | null> {
   return null
 }
 
-export async function filesAt(checkout: string, ref: string): Promise<string[] | null> {
-  const out = await git(checkout, ['ls-tree', '-r', '-z', '--name-only', ref])
-  return out === null ? null : nulSplit(out)
+/** `git diff --name-status -z`: a status, then one path (two for a rename: the old one first). */
+function removedIn(out: string): string[] {
+  const tokens = nulSplit(out)
+  const paths: string[] = []
+  for (let i = 0; i < tokens.length; ) {
+    const status = tokens[i] ?? ''
+    paths.push(tokens[i + 1] ?? '')
+    i += status.startsWith('R') || status.startsWith('C') ? 3 : 2
+  }
+  return paths.filter(Boolean)
+}
+
+/** Null when the folder is not a git checkout. */
+export async function readCheckout(checkout: string): Promise<CheckoutFacts | null> {
+  const [present, deleted, head] = await Promise.all([
+    git(checkout, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']),
+    git(checkout, ['ls-files', '-z', '--deleted']),
+    git(checkout, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  ])
+  if (present === null) return null
+  const deletedNow = nulSplit(deleted ?? '')
+  const gone = new Set(deletedNow)
+  const files = [...new Set(nulSplit(present))].filter((f) => !gone.has(f))
+  // A detached HEAD has no branch name: say so, with its commit, as Orca's sidebar does.
+  const name = head?.trim() || null
+  const branch = name === 'HEAD' ? `HEAD détachée @ ${(await git(checkout, ['rev-parse', '--short', 'HEAD']))?.trim() ?? '?'}` : name
+  const ref = await baseRef(checkout)
+  const base = ref && branch !== ref.replace(/^origin\//, '') ? ref : null
+  if (!base) return { branch, base: null, files, baseFiles: [], removed: deletedNow }
+  const forkPoint = (await git(checkout, ['merge-base', 'HEAD', base]))?.trim()
+  const [tip, diff] = await Promise.all([
+    git(checkout, ['ls-tree', '-r', '-z', '--name-only', base]),
+    forkPoint ? git(checkout, ['diff', '--name-status', '-z', '--diff-filter=DR', forkPoint, 'HEAD']) : Promise.resolve(null)
+  ])
+  return { branch, base, files, baseFiles: nulSplit(tip ?? ''), removed: [...new Set([...removedIn(diff ?? ''), ...deletedNow])] }
+}
+
+/** Of the given paths, those present on disk in the checkout even though git ignores them. */
+export async function presentOnDisk(checkout: string, paths: readonly string[]): Promise<string[]> {
+  const found = await Promise.all(paths.map(async (p) => ((await stat(join(checkout, p)).catch(() => null)) ? p : null)))
+  return found.filter((p): p is string => p !== null)
 }
 
 export async function readMemory(slug: string, file: string, root = projectsRoot()): Promise<string> {

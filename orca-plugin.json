@@ -2,8 +2,8 @@
   "manifestVersion": 2,
   "id": "claude-memory",
   "name": "Claude Memory",
-  "version": "0.2.0",
-  "description": "What Claude Code remembers about your project, and what no longer holds: memories citing deleted code, broken links, entries Claude cannot see. Read any memory in place; hand the fixes to Claude.",
+  "version": "0.3.0",
+  "description": "What Claude Code remembers about the project in front of you, and what no longer holds: memories citing deleted code, broken links, entries Claude cannot see. Read any memory in place; hand the fixes to a new Claude.",
   "engines": {
     "orca": ">=1.4.248"
   },
@@ -32,7 +32,7 @@
     "commands": [
       {
         "id": "show",
-        "title": "Claude Memory : afficher le panneau"
+        "title": "Claude Memory : afficher ou masquer la barre latérale"
       },
       {
         "id": "verify",
