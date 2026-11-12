@@ -7,6 +7,11 @@
   in WSL names it. `git` runs inside the distribution, where Git for Windows would refuse the
   repository; *Verify* gives Claude the Linux path of its memory. Only SSH workspaces are still out
   of reach.
+- An ambiguous workspace offers *Name them after their projects*: the look-alikes (`main` on
+  `main` in several repositories) take their projects' names, and the panel knows the focused one
+  at once, agent or not.
+- In a narrow panel, *Verify* and *Reload* drop under the project's name instead of being cut off.
+- When nothing is found, `orca plugin logs` says which folders were tried, and where.
 
 ## 0.4.0
 

@@ -62,7 +62,7 @@ test('no memory, no workspace, or an ambiguous one: says which, never shows anot
   assert.deepEqual(await none.request('memory.view'), { project: null, workspace: null })
   await none.deactivate()
   const twins = await mountWorker(main, { host: host('ok', {}, [ws('ok', 'a'), ws('ok', 'b')]) })
-  assert.deepEqual(await twins.request('memory.view'), { project: null, workspace: 'ok', unmatched: true })
+  assert.deepEqual(await twins.request('memory.view'), { project: null, workspace: 'ok', unmatched: true, twins: ['ok', 'ok (demo)'] })
   await twins.deactivate()
 })
 
@@ -83,6 +83,16 @@ test('a workspace on an SSH host: said as such, never « remembers nothing »', 
   const here = await mountWorker(main, { host: host('ok', {}, [{ ...ws('ok'), hostId: 'local' }]) })
   assert.equal((await here.request('memory.view')).project?.slug, '-demo-ok')
   await here.deactivate()
+})
+
+test('look-alikes renamed after their projects, on request: the focused one is then known', async () => {
+  const twins = [{ ...ws('main', 'a'), path: '/demo/broken', project: 'broken' }, { ...ws('main', 'b'), path: '/demo/ok', project: 'ok' }]
+  const h = host('main', { 'workspace.rename': { name: 'x' } }, twins)
+  const worker = await mountWorker(main, { host: h })
+  assert.deepEqual(await worker.request('memory.view'), { project: null, workspace: 'main', unmatched: true, twins: ['broken', 'ok'] })
+  assert.deepEqual(await worker.request('workspace.disambiguate', {}), { renamed: 2 })
+  assert.deepEqual(h.callsOf('workspace.rename'), [{ workspaceId: 'a', name: 'broken' }, { workspaceId: 'b', name: 'ok' }])
+  await worker.deactivate()
 })
 
 test('reads one memory without its header, and refuses a path out of the folder', async () => {

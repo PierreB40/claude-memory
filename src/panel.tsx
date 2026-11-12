@@ -145,6 +145,20 @@ async function verify(): Promise<void> {
   }
 }
 
+/** The look-alike workspaces take their projects' names: Orca then says which one is in front. */
+async function nameTwins(): Promise<void> {
+  set(busy, true)
+  set(said, null)
+  try {
+    await plugin.request('workspace.disambiguate', locale())
+    await load()
+  } catch (e) {
+    set(said, { ok: false, text: message(e) })
+  } finally {
+    set(busy, false)
+  }
+}
+
 /** Leaving the recent tab is having seen what Claude learned there. */
 function showTab(next: string): void {
   const s = read(state)
@@ -283,7 +297,8 @@ function Header({ p }: { p: ProjectView }) {
   const feedback = read(said)
   return (
     <Stack gap="xs">
-      <Row justify="between" align="center">
+      {/* Narrow, the actions drop under the title instead of being cut off at the edge. */}
+      <Row justify="between" align="center" gap="xs" wrap>
         <Stack gap="none">
           <Text weight="semibold" truncate>
             {p.label}
@@ -462,7 +477,20 @@ export default function Panel() {
   if (!s.workspace) return <EmptyState icon="folder" title={w.noWorkspace.title} description={w.noWorkspace.description} />
   if (s.unmatched) {
     const a = w.ambiguous(s.workspace)
-    return <EmptyState icon="folder" title={a.title} description={a.description} />
+    const feedback = read(said)
+    return (
+      <EmptyState icon="folder" title={a.title} description={a.description}>
+        {s.twins?.length ? (
+          <Stack gap="sm">
+            <Text size="sm">{w.twins(s.twins)}</Text>
+            <Button variant="solid" size="sm" disabled={read(busy)} onPress={nameTwins}>
+              {read(busy) ? w.namingTwins : w.nameTwins}
+            </Button>
+          </Stack>
+        ) : null}
+        {feedback && !feedback.ok ? <Text size="sm">{feedback.text}</Text> : null}
+      </EmptyState>
+    )
   }
   if (s.remote) {
     const r = w.remote(s.workspace)

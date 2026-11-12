@@ -3,6 +3,8 @@
 export interface WorkspaceInfo {
   id: string
   name: string
+  /** Its project's (repository's) name in Orca, when it has one. */
+  project?: string | null
   path: string
   branch: string | null
   /** Orca's host for it: null or `local` here, `wsl:<distro>`, or an SSH host's id. */
@@ -36,18 +38,47 @@ export function matchWorkspace(
   workspaces: readonly WorkspaceInfo[],
   owners: ReadonlyMap<string, string> = new Map()
 ): WorkspaceInfo | null {
+  const pool = poolOf(ctx, workspaces)
+  if (pool.length === 1) return pool[0] ?? null
   const mine = new Set((ctx.terminals ?? []).map((t) => owners.get(t.id)).filter(Boolean))
-  const pick = (pool: readonly WorkspaceInfo[]): WorkspaceInfo | null => {
-    if (pool.length === 1) return pool[0] ?? null
-    const owned = pool.filter((w) => mine.has(w.id))
-    return owned.length === 1 ? (owned[0] ?? null) : null
-  }
+  const owned = pool.filter((w) => mine.has(w.id))
+  return owned.length === 1 ? (owned[0] ?? null) : null
+}
+
+/** The workspaces Orca's context fits: by name and branch, else the only one matching either. */
+function poolOf(ctx: FocusedContext, workspaces: readonly WorkspaceInfo[]): WorkspaceInfo[] {
   const branch = shortBranch(ctx.branch)
   const byBranch = branch ? workspaces.filter((w) => shortBranch(w.branch) === branch) : []
   const both = byBranch.filter((w) => w.name === ctx.displayName)
-  if (both.length > 0) return pick(both)
-  if (byBranch.length === 1) return byBranch[0] ?? null
-  return pick(workspaces.filter((w) => w.name === ctx.displayName))
+  if (both.length > 0) return both
+  if (byBranch.length === 1) return byBranch
+  return workspaces.filter((w) => w.name === ctx.displayName)
+}
+
+/** The workspaces the context cannot tell apart, when it fits several: what renaming fixes. */
+export function twinsOf(ctx: FocusedContext, workspaces: readonly WorkspaceInfo[], owners?: ReadonlyMap<string, string>): WorkspaceInfo[] {
+  return matchWorkspace(ctx, workspaces, owners) ? [] : poolOf(ctx, workspaces).filter((_, _i, all) => all.length > 1)
+}
+
+/**
+ * A name for each twin that no other workspace has: its project's (`shop`), else its folder's;
+ * its parent folder in brackets when that is taken too (`shop (dev)`), then a number.
+ */
+export function namesForTwins(twins: readonly WorkspaceInfo[], workspaces: readonly WorkspaceInfo[]): Map<string, string> {
+  const twinIds = new Set(twins.map((w) => w.id))
+  const taken = new Set(workspaces.filter((w) => !twinIds.has(w.id)).map((w) => w.name))
+  const names = new Map<string, string>()
+  for (const w of twins) {
+    const folders = w.path.split(/[\\/]/).filter(Boolean)
+    const base = w.project?.trim() || folders.at(-1) || w.name
+    const parent = folders.at(-2) ?? w.name
+    let name = base
+    if (taken.has(name)) name = `${base} (${parent})`
+    for (let n = 2; taken.has(name); n++) name = `${base} (${parent} ${n})`
+    taken.add(name)
+    names.set(w.id, name)
+  }
+  return names
 }
 
 /** Forward slashes only: Windows paths (`C:\Users\me`) compared and resolved like POSIX ones. */

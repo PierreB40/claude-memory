@@ -1,6 +1,6 @@
 import { assert, test } from 'orca/testing'
 import { execFileSync } from 'node:child_process'
-import { candidateSlugs, claudeCommand, launchOf, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, resolvePath, slugOf, writtenPath } from './detect.ts'
+import { candidateSlugs, claudeCommand, launchOf, mainCheckoutOf, matchWorkspace, namesForTwins, twinsOf, memoryOfPath, readPath, resolvePath, slugOf, writtenPath } from './detect.ts'
 
 const ws = (id: string, name: string, path: string, branch: string | null) => ({ id, name, path, branch })
 
@@ -23,6 +23,21 @@ test('two alike are told apart by a terminal an agent event tied to one of them'
   assert.equal(matchWorkspace({ displayName: 'main', branch: 'main', terminals: [{ id: 't-elsewhere' }] }, list, owners), null)
   const both = new Map([['t-a', '1'], ['t-b', '2']])
   assert.equal(matchWorkspace({ displayName: 'main', branch: 'main', terminals: [{ id: 't-a' }, { id: 't-b' }] }, list, both), null, 'still two: never a guess')
+})
+
+test('look-alikes are named after their projects, never as another workspace is', () => {
+  const list = [
+    { ...ws('1', 'main', '/dev/shop', 'main'), project: 'shop' },
+    { ...ws('2', 'main', '/dev/blog', 'main'), project: null },
+    { ...ws('3', 'main', '/dev/infra', 'main'), project: 'infra' },
+    ws('4', 'infra', '/orca/infra/x', 'feature')
+  ]
+  const ctx = { displayName: 'main', branch: 'main' }
+  assert.deepEqual(twinsOf(ctx, list).map((w) => w.id), ['1', '2', '3'])
+  assert.deepEqual([...namesForTwins(twinsOf(ctx, list), list).values()], ['shop', 'blog', 'infra (dev)'])
+  assert.deepEqual(twinsOf({ displayName: 'infra', branch: 'feature' }, list), [], 'one workspace fits: no twins')
+  const same = [{ ...ws('a', 'main', '/x/app', 'main'), project: 'app' }, { ...ws('b', 'main', '/y/app', 'main'), project: 'app' }]
+  assert.deepEqual([...namesForTwins(same, same).values()], ['app', 'app (y)'])
 })
 
 test('a linked worktree maps to its main checkout, absolute or relative gitdir', () => {

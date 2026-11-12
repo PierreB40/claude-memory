@@ -5,7 +5,7 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, readableBody, toVerify, verifyCount, writeDefects, type MemoryFile } from './audit.ts'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
-import { candidateSlugs, launchOf, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { candidateSlugs, launchOf, mainCheckoutOf, matchWorkspace, namesForTwins, twinsOf, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
 import { langOf, systemLang, words, type Lang, type Words } from './i18n.ts'
 import type { PanelView, ProjectView } from './protocol.ts'
 import { isRemote, linuxHomeOf, uncOf, wslOf } from './place.ts'
@@ -126,17 +126,17 @@ interface Known extends WorkspaceInfo {
 }
 
 /** The focused workspace, matched among every workspace Orca knows; and its name, matched or not. */
-async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known | null; name: string | null; all: WorkspaceInfo[] }> {
+async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known | null; name: string | null; all: WorkspaceInfo[]; twins: WorkspaceInfo[] }> {
   const [ctx, { workspaces: all }] = await Promise.all([
     orca.host.call('workspace.readContext').catch(() => null),
     orca.host.call('workspace.list').catch(() => ({ workspaces: [] }))
   ])
-  if (!ctx) return { focused: null, name: null, all }
+  if (!ctx) return { focused: null, name: null, all, twins: [] }
   const match = matchWorkspace(ctx, all, owners)
-  if (!match) return { focused: null, name: ctx.displayName, all }
+  if (!match) return { focused: null, name: ctx.displayName, all, twins: twinsOf(ctx, all, owners) }
   const place = await placeOf(orca, match)
   const gitFile = place ? await readGitFile(place.checkout) : null
-  return { focused: { ...match, gitFile, place }, name: ctx.displayName, all }
+  return { focused: { ...match, gitFile, place }, name: ctx.displayName, all, twins: [] }
 }
 
 const gitCache = new Map<string, { at: number; facts: Promise<CheckoutFacts | null> }>()
@@ -191,8 +191,13 @@ const lastSegment = (path: string): string => path.split('/').filter(Boolean).po
 
 /** The focused workspace's project, if it has one: like every Orca sidebar tab, never another. */
 async function view(orca: OrcaWorkerApi): Promise<PanelView & { focused: Known | null }> {
-  const { focused, name } = await focusedWorkspace(orca)
-  if (!focused) return { project: null, workspace: name, unmatched: name !== null, focused: null }
+  const { focused, name, all, twins } = await focusedWorkspace(orca)
+  if (!focused) {
+    if (name === null) return { project: null, workspace: null, focused: null }
+    // Renaming needs Orca's `workspace.rename`; without it, only an agent's terminal can tell.
+    const names = twins.length && orca.host.has('workspace.rename') ? [...namesForTwins(twins, all).values()] : []
+    return { project: null, workspace: name, unmatched: true, ...(names.length ? { twins: names } : {}), focused: null }
+  }
   const place = focused.place
   if (!place) return { project: null, workspace: focused.name, remote: true, focused }
   let slug: string | null = null
@@ -263,6 +268,18 @@ async function focusMayHaveResolved(orca: OrcaWorkerApi, terminalId: string | un
   await refreshStatus(orca)
 }
 
+/** Each look-alike workspace takes its project's name, which no other workspace has. */
+async function disambiguate(orca: OrcaWorkerApi): Promise<{ renamed: number }> {
+  const { all, twins } = await focusedWorkspace(orca)
+  let renamed = 0
+  for (const [id, name] of namesForTwins(twins, all)) {
+    if (all.find((w) => w.id === id)?.name === name) continue
+    await orca.host.call('workspace.rename', { workspaceId: id, name })
+    renamed++
+  }
+  return { renamed }
+}
+
 /** Always a NEW Claude in its own terminal: an idle-looking agent may be a conversation in progress. */
 async function handOver(orca: OrcaWorkerApi): Promise<{ count: number; workspace: string }> {
   const { project: p, focused } = await view(orca)
@@ -319,8 +336,15 @@ export default function activate(orca: OrcaWorkerApi): void {
   lang = systemLang()
   orca.panels.handle('memory.view', async (input) => {
     await heard(orca, input?.locale)
-    const { project, workspace, unmatched, remote } = await view(orca)
-    return { project, workspace, ...(unmatched ? { unmatched } : {}), ...(remote ? { remote } : {}) }
+    const { project, workspace, unmatched, twins, remote } = await view(orca)
+    return { project, workspace, ...(unmatched ? { unmatched } : {}), ...(twins ? { twins } : {}), ...(remote ? { remote } : {}) }
+  })
+
+  orca.panels.handle('workspace.disambiguate', async (input) => {
+    await heard(orca, input?.locale)
+    const done = await disambiguate(orca)
+    await refreshStatus(orca)
+    return done
   })
 
   orca.panels.handle('memory.read', async ({ slug, file, locale }) => {
