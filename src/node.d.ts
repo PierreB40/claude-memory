@@ -17,3 +17,11 @@ declare module 'node:path' {
   export function join(...parts: string[]): string
 }
 declare const process: { argv: string[]; exitCode?: number; stdout: { write(s: string): boolean } }
+declare module 'node:child_process' {
+  export function execFile(
+    file: string,
+    args: readonly string[],
+    options: { cwd?: string; maxBuffer?: number; encoding: 'utf8' },
+    callback: (error: Error | null, stdout: string) => void
+  ): void
+}

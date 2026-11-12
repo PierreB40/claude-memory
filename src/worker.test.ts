@@ -3,88 +3,66 @@ import { assert, mockHost, mountWorker, test } from 'orca/testing'
 import * as main from './worker'
 
 const root = new URL('../fixtures/projects', import.meta.url).pathname
+const host = (results: Record<string, unknown> = {}) => mockHost({ settings: { projectsRoot: root }, results })
+const focused = { branch: 'demo', displayName: 'demo', terminals: [] }
+const noWorkspace = { 'workspace.readContext': null, 'workspace.list': { workspaces: [], truncated: false } }
 
 test('lists the projects that have memories, most first', async () => {
-  const worker = await mountWorker(main, { host: mockHost({ settings: { projectsRoot: root } }) })
-  const answer = await worker.request('memory.projects')
-  assert.equal(answer.root, root)
-  assert.deepEqual(
-    answer.projects.map((p) => [p.slug, p.count]),
-    [
-      ['-demo-broken', 3],
-      ['-demo-ok', 1]
-    ]
-  )
+  const worker = await mountWorker(main, { host: host(noWorkspace) })
+  const { projects } = await worker.request('memory.projects')
+  assert.deepEqual(projects.map((p) => [p.slug, p.count]), [['-demo-broken', 3], ['-demo-ok', 1]])
   await worker.deactivate()
 })
 
-test('audits one project', async () => {
-  const worker = await mountWorker(main, { host: mockHost({ settings: { projectsRoot: root } }) })
-  const ok = await worker.request('memory.audit', { slug: '-demo-ok' })
-  assert.deepEqual(ok.issues, [])
-  const broken = await worker.request('memory.audit', { slug: '-demo-broken' })
-  assert.deepEqual(broken.issues.map((i) => i.kind).sort(), [
-    'broken-link',
-    'index-dangling',
-    'link-by-filename',
-    'no-frontmatter',
-    'not-indexed',
-    'not-indexed'
-  ])
+test('without a matching workspace, views the largest project, code unchecked', async () => {
+  const worker = await mountWorker(main, { host: host(noWorkspace) })
+  const view = await worker.request('memory.view', {})
+  assert.equal(view?.slug, '-demo-broken')
+  assert.equal(view?.detectedFrom, null)
+  assert.equal(view?.repo, null)
+  assert.equal(view?.repoChecked, false)
+  assert.deepEqual(view?.indexProblems, ["MEMORY.md renvoie vers ancien.md, qui n'existe plus."])
+  await worker.deactivate()
+})
+
+test('views the project asked for, and reads one memory without its header', async () => {
+  const worker = await mountWorker(main, { host: host(noWorkspace) })
+  assert.equal((await worker.request('memory.view', { slug: '-demo-ok' }))?.memories.length, 1)
+  assert.deepEqual(await worker.request('memory.read', { slug: '-demo-ok', file: 'stack.md' }), { body: "Le front est Nuxt, l'API est Hono." })
+  await assert.rejects(worker.request('memory.read', { slug: '-demo-ok', file: '../../x.md' }))
+  await worker.deactivate()
+})
+
+test('types the verification into an idle Claude agent', async () => {
+  const h = host({
+    ...noWorkspace,
+    'agents.list': { agents: [{ terminalId: 't1', title: 'Claude', agent: 'claude', state: 'waiting', stateStartedAt: 0 }] },
+    'terminal.sendText': { accepted: true }
+  })
+  const worker = await mountWorker(main, { host: h })
+  assert.deepEqual(await worker.request('memory.verify', { slug: '-demo-broken' }), { via: 'terminal', count: 4 })
+  const sent = h.calls.find((c) => c.method === 'terminal.sendText')?.params as { terminalId: string; text: string }
+  assert.equal(sent.terminalId, 't1')
+  assert.ok(!sent.text.includes('\n'))
   assert.deepEqual(worker.refusals, [])
   await worker.deactivate()
 })
 
-test('refuses a slug that walks out of the projects folder', async () => {
-  const worker = await mountWorker(main, { host: mockHost({ settings: { projectsRoot: root } }) })
-  await assert.rejects(worker.request('memory.audit', { slug: '../..' }))
-  await worker.deactivate()
-})
-
-const focused = { branch: 'demo', displayName: 'demo', terminals: [] }
-const workspaces = { workspaces: [{ id: 'w1', kind: 'worktree', name: 'demo', path: '/nowhere/demo', branch: 'refs/heads/demo', hostId: null }], truncated: false }
-
-test('detects nothing when the focused workspace has no Claude memory', async () => {
-  const host = mockHost({ settings: { projectsRoot: root }, results: { 'workspace.readContext': focused, 'workspace.list': workspaces } })
-  const worker = await mountWorker(main, { host })
-  assert.deepEqual(await worker.request('memory.detect'), { slug: null, workspace: 'demo' })
-  await worker.deactivate()
-})
-
-test('types the fix into an idle Claude agent', async () => {
-  const host = mockHost({
-    settings: { projectsRoot: root },
-    results: {
-      'agents.list': { agents: [{ terminalId: 't1', title: 'Claude', agent: 'claude', state: 'waiting', stateStartedAt: 0 }] },
-      'terminal.sendText': { accepted: true }
-    }
+test('launches Claude in the focused workspace when every agent is busy', async () => {
+  const h = host({
+    'workspace.readContext': focused,
+    'workspace.list': { workspaces: [{ id: 'w1', kind: 'worktree', name: 'demo', path: '/nowhere/demo', branch: 'refs/heads/demo', hostId: null }], truncated: false },
+    'agents.list': { agents: [{ terminalId: 't1', title: 'Claude', agent: 'claude', state: 'working', stateStartedAt: 0 }] },
+    'agent.launch': { terminalId: 't2' }
   })
-  const worker = await mountWorker(main, { host })
-  assert.deepEqual(await worker.request('memory.fix', { slug: '-demo-broken' }), { via: 'terminal', count: 6 })
-  const sent = host.calls.find((c) => c.method === 'terminal.sendText')
-  assert.equal((sent?.params as { terminalId: string }).terminalId, 't1')
-  assert.deepEqual(worker.refusals, [])
+  const worker = await mountWorker(main, { host: h })
+  assert.deepEqual(await worker.request('memory.verify', { slug: '-demo-broken' }), { via: 'launch', count: 4 })
+  assert.ok(!h.calls.some((c) => c.method === 'terminal.sendText'))
   await worker.deactivate()
 })
 
-test('launches Claude when every agent is busy', async () => {
-  const host = mockHost({
-    settings: { projectsRoot: root },
-    results: {
-      'agents.list': { agents: [{ terminalId: 't1', title: 'Claude', agent: 'claude', state: 'working', stateStartedAt: 0 }] },
-      'workspace.readContext': focused,
-      'workspace.list': workspaces,
-      'agent.launch': { terminalId: 't2' }
-    }
-  })
-  const worker = await mountWorker(main, { host })
-  assert.deepEqual(await worker.request('memory.fix', { slug: '-demo-broken' }), { via: 'launch', count: 6 })
-  assert.ok(!host.calls.some((c) => c.method === 'terminal.sendText'))
-  await worker.deactivate()
-})
-
-test('refuses to fix a folder with no problem', async () => {
-  const worker = await mountWorker(main, { host: mockHost({ settings: { projectsRoot: root } }) })
-  await assert.rejects(worker.request('memory.fix', { slug: '-demo-ok' }))
+test('refuses to verify a folder with nothing to verify', async () => {
+  const worker = await mountWorker(main, { host: host(noWorkspace) })
+  await assert.rejects(worker.request('memory.verify', { slug: '-demo-ok' }))
   await worker.deactivate()
 })

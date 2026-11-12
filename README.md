@@ -1,30 +1,36 @@
 # Claude Memory — Orca plugin
 
-Audits Claude Code's auto-memory (`~/.claude/projects/<project>/memory/`) from Orca's sidebar.
-The panel never writes a memory: "Ask Claude to fix" hands the problems to a Claude agent of the focused workspace (an idle one, else a new one).
+What Claude Code remembers about the project you are working on, and what no longer holds.
 
-## What it flags
+Claude Code writes memories on its own (`~/.claude/projects/<project>/memory/`) and reads them
+at every session. Nobody rereads them; the code moves on, and a memory describing deleted files
+keeps steering the agent. This panel shows, for the focused Orca workspace:
 
-| Kind | Severity | Meaning |
-|---|---|---|
-| `broken-link` | danger | `[[slug]]` matches no memory |
-| `index-dangling` | danger | `MEMORY.md` links to a file that does not exist |
-| `duplicate-name` | danger | two files share one `name:` |
-| `index-too-long` | danger | `MEMORY.md` past 200 lines: Claude Code does not load the rest |
-| `link-by-filename` | warning | `[[x]]` matches a file name, not that memory's `name:` |
-| `not-indexed` | warning | a memory missing from `MEMORY.md` |
-| `no-frontmatter` | warning | no `name` / `description` / `type` header |
-| `stale` | info | a `project` memory untouched for 60+ days (setting): to reread |
+1. **To verify** — memories citing files that are gone from the repository (most of their code
+   gone first), dead `[[links]]`, links aimed at a file name instead of a `name:`, memories
+   missing from `MEMORY.md` (Claude never sees them), an index past what Claude loads.
+   **Have Claude verify** hands the list to an idle Claude agent of the workspace (or launches
+   one): it fixes what is still useful and *proposes* what to delete, never deletes alone.
+2. **Learned this week** — what Claude wrote or changed by itself lately, to read it once.
+3. **Everything** — searchable, grouped by type. Any memory opens in place, with what is wrong
+   with it and the memories it links to.
+
+The project is detected from the focused workspace (a linked worktree maps to its main
+checkout, where Claude Code files the memory). Cited paths are checked with `git ls-files` on
+that checkout; a path whose first folder is not in the repository (a package, a domain) is not
+judged. The panel itself never writes a memory.
 
 ## Use
 
 ```bash
-orca plugin dev watch . --check            # load it in Orca while developing (asks approval)
-orca plugin test .                         # tests
-node src/cli.ts                            # list projects with memories, no Orca needed
-node src/cli.ts -Users-me-Dev-app [--all]  # audit one; exit 1 on a danger
+orca plugin dev watch . --check                  # load it in Orca (asks approval once)
+orca plugin test .                               # tests
+node src/cli.ts                                  # projects with memories, no Orca needed
+node src/cli.ts -Users-me-Dev-app ~/Dev/app      # what to verify; exit 1 when anything is
 ```
 
-Settings: `projectsRoot` (default `~/.claude/projects`), `staleDays` (default 60).
+Setting: `projectsRoot` (default `~/.claude/projects`).
 
-Access asked: a Node worker on your machine (it reads the memory folders), its own settings, the focused workspace (to pick its project), agent status, typing into a terminal and launching an agent (to hand over the fix).
+Access asked: a Node worker on your machine (reads the memory folders and runs `git ls-files`),
+its own settings, the focused workspace (to pick its project), agent status, typing into a
+terminal and launching an agent (to hand over the verification).

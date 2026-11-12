@@ -1,4 +1,5 @@
 // Reads Claude Code memory folders from disk. Worker and CLI only: a panel has no file system.
+import { execFile } from 'node:child_process'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -70,4 +71,18 @@ export async function readMemoryFolder(slug: string, root = projectsRoot()): Pro
       return { file, content, mtimeMs: info.mtimeMs }
     })
   )
+}
+
+/** Tracked files of a repository, relative to its root; null when it is not one (or git fails). */
+export function trackedFiles(repo: string): Promise<string[] | null> {
+  return new Promise((resolve) => {
+    execFile('git', ['ls-files', '-z'], { cwd: repo, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' }, (error, stdout) => {
+      resolve(error ? null : stdout.split('\0').filter(Boolean))
+    })
+  })
+}
+
+export async function readMemory(slug: string, file: string, root = projectsRoot()): Promise<string> {
+  if (/[/\\]|\.\./.test(slug) || /[/\\]|\.\./.test(file) || !file.endsWith('.md')) throw new Error('Mémoire invalide.')
+  return readFile(join(root, slug, 'memory', file), 'utf8')
 }

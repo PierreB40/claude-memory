@@ -1,23 +1,24 @@
-// `node src/cli.ts [slug] [--all]` — the same audit as the panel, in a terminal.
-// Without a slug: lists the projects that have memories. `--all` also prints the memories to reread.
-import { audit, DEFAULT_OPTIONS } from './audit.ts'
-import { listProjects, readMemoryFolder } from './store.ts'
+// `node src/cli.ts [slug] [repo]` — the audit in a terminal, without Orca.
+// Without a slug: lists the projects that have memories. With `repo`, cited paths are checked.
+import { audit, DEFAULT_OPTIONS, toVerify } from './audit.ts'
+import { listProjects, readMemoryFolder, trackedFiles } from './store.ts'
 
-const args = process.argv.slice(2)
-const slug = args.find((a) => !a.startsWith('--'))
-const all = args.includes('--all')
+const [slug, repo] = process.argv.slice(2)
 const out = (s = ''): boolean => process.stdout.write(`${s}\n`)
-const ICON = { danger: '✖', warning: '⚠', info: '·' } as const
 
 if (!slug) {
   for (const p of await listProjects()) out(`${String(p.count).padStart(4)}  ${p.slug}`)
 } else {
-  const result = audit(await readMemoryFolder(slug), { ...DEFAULT_OPTIONS, now: Date.now() })
-  const problems = result.issues.filter((i) => i.severity !== 'info')
-  const reread = result.issues.filter((i) => i.severity === 'info')
-  out(`${result.memories.length} mémoires · MEMORY.md ${result.index.lines} lignes, ${(result.index.bytes / 1024).toFixed(1)} Ko`)
-  out(`${problems.length} problème(s) · ${reread.length} à relire${all ? '' : ' (--all pour la liste)'}`)
-  out()
-  for (const i of all ? result.issues : problems) out(`${ICON[i.severity]} ${i.kind.padEnd(16)} ${i.file ?? ''}  ${i.message}`)
-  if (problems.some((i) => i.severity === 'danger')) process.exitCode = 1
+  const repoFiles = repo ? await trackedFiles(repo) : null
+  const result = audit(await readMemoryFolder(slug), { ...DEFAULT_OPTIONS, repoFiles })
+  const items = toVerify(result)
+  out(`${result.memories.length} mémoires · MEMORY.md ${result.index.lines} lignes · ${repoFiles ? 'code vérifié' : 'code non vérifié (passer le dépôt)'}`)
+  out(`${items.length + result.indexProblems.length} à vérifier`)
+  for (const text of result.indexProblems) out(`  ✖ ${text}`)
+  for (const m of items) {
+    out(`  • ${m.file}`)
+    if (m.missingPaths.length) out(`      ${m.missingPaths.length}/${m.cited} introuvable(s) : ${m.missingPaths.join(', ')}`)
+    for (const p of m.problems) out(`      ${p.detail}`)
+  }
+  if (items.length || result.indexProblems.length) process.exitCode = 1
 }

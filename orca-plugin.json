@@ -3,7 +3,7 @@
   "id": "claude-memory",
   "name": "Claude Memory",
   "version": "0.1.0",
-  "description": "Audits Claude Code's auto-memory: broken [[links]], memories missing from MEMORY.md, duplicates, an index too long to load, project memories to reread.",
+  "description": "What Claude Code remembers about your project, and what no longer holds: memories citing deleted code, broken links, entries Claude cannot see. Read any memory in place; hand the fixes to Claude.",
   "engines": {
     "orca": ">=1.4.248"
   },
@@ -27,12 +27,6 @@
         "description": "Leave empty for ~/.claude/projects.",
         "type": "string",
         "default": ""
-      },
-      {
-        "key": "staleDays",
-        "title": "Reread project memories older than (days)",
-        "type": "integer",
-        "default": 60
       }
     ]
   },

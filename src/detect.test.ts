@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { candidateSlugs, fixPrompt, mainCheckoutOf, matchWorkspace, slugOf } from './detect.ts'
+import { candidateSlugs, mainCheckoutOf, matchWorkspace, repoOfSlug, slugOf } from './detect.ts'
 
 const ws = (id: string, name: string, path: string, branch: string | null) => ({ id, name, path, branch })
 
@@ -27,13 +27,12 @@ test('a linked worktree maps to its main checkout first', () => {
   assert.deepEqual(candidateSlugs('/Users/me/Dev/shop', null), ['-Users-me-Dev-shop'])
 })
 
-test('the fix prompt is one line and leaves out what is only to reread', () => {
-  const prompt = fixPrompt('/m', [
-    { kind: 'broken-link', severity: 'danger', file: 'a.md', message: '[[x]] ne correspond à aucune mémoire.' },
-    { kind: 'stale', severity: 'info', file: 'b.md', message: 'vieux' }
-  ])
-  assert.ok(!prompt.includes('\n'))
-  assert.ok(prompt.includes('1 problème(s)'))
-  assert.ok(prompt.includes('a.md : [[x]]'))
-  assert.ok(!prompt.includes('b.md'))
+test('finds the checkout a project slug came from, through any worktree', () => {
+  const known = [
+    { path: '/Users/me/orca/shop/feature', gitFile: 'gitdir: /Users/me/Dev/shop/.git/worktrees/feature' },
+    { path: '/Users/me/Dev/infra', gitFile: null }
+  ]
+  assert.equal(repoOfSlug('-Users-me-Dev-shop', known), '/Users/me/Dev/shop')
+  assert.equal(repoOfSlug('-Users-me-Dev-infra', known), '/Users/me/Dev/infra')
+  assert.equal(repoOfSlug('-Users-me-Dev-other', known), null)
 })

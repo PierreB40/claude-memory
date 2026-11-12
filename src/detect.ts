@@ -1,6 +1,4 @@
 // Which Claude Code project belongs to the focused Orca workspace. Pure: the worker feeds it.
-import type { Issue } from './audit.ts'
-
 export interface WorkspaceInfo {
   id: string
   name: string
@@ -46,15 +44,12 @@ export function candidateSlugs(path: string, gitFile: string | null): string[] {
   return [...new Set([main, path].filter((p): p is string => Boolean(p)).map(slugOf))]
 }
 
-/**
- * One line: an agent's TUI submits on newline, so the request must not contain any.
- * Lists only real problems; what to reread is a judgement the agent should not make alone.
- */
-export function fixPrompt(dir: string, issues: readonly Issue[]): string {
-  const items = issues.filter((i) => i.severity !== 'info').map((i) => `${i.file ?? 'MEMORY.md'} : ${i.message}`)
-  return [
-    `Ta mémoire automatique Claude Code (${dir}) a ${items.length} problème(s) de cohérence.`,
-    `Corrige-les sans toucher au reste : ${items.join(' ; ')}.`,
-    "Pour un lien, vise le name: de la mémoire cible ; pour une mémoire hors index, ajoute sa ligne à MEMORY.md ; ne supprime aucune mémoire sans me le demander."
-  ].join(' ')
+/** The checkout a Claude project slug was made from, across every workspace Orca knows. */
+export function repoOfSlug(slug: string, workspaces: readonly { path: string; gitFile: string | null }[]): string | null {
+  for (const w of workspaces) {
+    const main = w.gitFile ? mainCheckoutOf(w.gitFile) : null
+    if (main && slugOf(main) === slug) return main
+    if (slugOf(w.path) === slug) return w.path
+  }
+  return null
 }
