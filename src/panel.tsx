@@ -91,6 +91,13 @@ async function load(): Promise<void> {
   try {
     const view = await plugin.request('memory.view', locale())
     if (ticket !== loading) return
+    const before = read(state)
+    if (before.status === 'ready' && before.project && before.project.slug !== view.project?.slug) {
+      // Another project behind the same workspace name: nothing of the last one stays open.
+      set(opened, null)
+      set(said, null)
+      set(query, '')
+    }
     set(state, { status: 'ready', ...view })
     // The open memory may have changed, or gone: reread it, or come back to the list.
     const o = read(opened)
@@ -149,15 +156,17 @@ function showTab(next: string): void {
 export function setup(ctx: PanelContext): void {
   void load()
   // Like Orca's own tabs, the panel is about the focused workspace: a new one reloads it at once.
-  // Terminal opens and closes fire the same event with the same workspace: those are ignored.
+  // The same name and branch may still be another workspace (two `main` checkouts): reloaded in
+  // place, it keeps what is open unless the project changed. Terminal opens and closes land there too.
   let last: string | undefined
   ctx.subscriptions.push(
     on('workspace.changed', ({ context }) => {
       const key = context ? `${context.displayName}\u0000${context.branch}` : ''
       const first = last === undefined
-      if (key === last) return
-      last = key
+      if (first) last = key
       if (first) return
+      if (key === last) return void load()
+      last = key
       set(opened, null)
       set(said, null)
       set(query, '')
@@ -167,6 +176,10 @@ export function setup(ctx: PanelContext): void {
     plugin.on('memory.changed', ({ slug }) => {
       const s = read(state)
       if (s.status === 'ready' && s.project?.slug === slug) void load()
+    }),
+    plugin.on('focus.resolved', () => {
+      const s = read(state)
+      if (s.status === 'ready' && s.unmatched) void load()
     })
   )
 }
@@ -450,6 +463,10 @@ export default function Panel() {
   if (s.unmatched) {
     const a = w.ambiguous(s.workspace)
     return <EmptyState icon="folder" title={a.title} description={a.description} />
+  }
+  if (s.remote) {
+    const r = w.remote(s.workspace)
+    return <EmptyState icon="folder" title={r.title} description={r.description} />
   }
   if (!s.project) {
     const n = w.nothingLearned(s.workspace)

@@ -71,6 +71,9 @@
     "events": [
       {
         "on": "workspace.changed"
+      },
+      {
+        "on": "agent.status.changed"
       }
     ],
     "hooks": [
@@ -91,6 +94,12 @@
     },
     {
       "kind": "workspace:write"
+    },
+    {
+      "kind": "agent:read"
+    },
+    {
+      "kind": "agent:launch"
     },
     {
       "kind": "terminal:send"

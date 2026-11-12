@@ -12,6 +12,7 @@ declare module 'node:fs/promises' {
 declare module 'node:os' {
   export function homedir(): string
   export function tmpdir(): string
+  export function platform(): string
 }
 declare module 'node:path' {
   export function join(...parts: string[]): string

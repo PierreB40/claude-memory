@@ -113,14 +113,12 @@ test('a sound memory opens on Recent; leaving it, as the default tab, marks the 
 })
 
 test('switches by itself when another workspace comes to the front', async () => {
-  const v = await mountWith([
-    { project: project([memory({ title: 'De shop' })]), workspace: 'analyze' },
-    { project: null, workspace: 'infra' }
-  ]).view
+  const shop = { project: project([memory({ title: 'De shop' })]), workspace: 'analyze' }
+  const v = await mountWith([shop, shop, { project: null, workspace: 'infra' }]).view
   await v.emit('workspace.changed', { context: { displayName: 'analyze', branch: 'x', terminals: [] } })
   assert.ok(drawn(v).includes('shop'))
   await v.emit('workspace.changed', { context: { displayName: 'analyze', branch: 'x', terminals: [{ id: 't' }] } })
-  assert.ok(drawn(v).includes('shop'), 'a terminal opening is not a new workspace')
+  assert.ok(drawn(v).includes('shop'), 'a terminal opening is asked again, and stays the same workspace')
   await v.emit('workspace.changed', { context: { displayName: 'infra', branch: 'main', terminals: [] } })
   assert.ok(drawn(v).includes('Claude n’a rien retenu sur « infra »'))
   await v.unmount()
@@ -160,6 +158,7 @@ test('an open memory that disappears brings back the list', async () => {
 test('no workspace, or an ambiguous one, says which', async () => {
   assert.ok(drawn(await mountWith([{ project: null, workspace: null }]).view).includes('Aucun workspace ouvert'))
   assert.ok(drawn(await mountWith([{ project: null, workspace: 'main', unmatched: true }]).view).includes('Workspace « main » ambigu'))
+  assert.ok(drawn(await mountWith([{ project: null, workspace: 'api', remote: true }]).view).includes('« api » est sur un autre hôte'))
 })
 
 test('in English when Orca is', async () => {
