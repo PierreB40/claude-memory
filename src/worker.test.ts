@@ -56,6 +56,7 @@ test('follows the focused workspace, and only it', async () => {
 test('no memory, no workspace, or an ambiguous one: says which, never shows another project', async () => {
   const other = await french(host('other'))
   assert.deepEqual(await other.request('memory.view'), { project: null, workspace: 'other' })
+  assert.ok(other.logs.some((l) => l.includes('tried -demo-other in ')), 'says where it looked')
   await other.deactivate()
   const none = await mountWorker(main, { host: host(null) })
   assert.deepEqual(await none.request('memory.view'), { project: null, workspace: null })
@@ -75,10 +76,10 @@ test('two workspaces of one name: an agent status ties the focused terminal to o
   await worker.deactivate()
 })
 
-test('a workspace on another host: said as such, never « remembers nothing »', async () => {
-  const wsl = await mountWorker(main, { host: host('ok', {}, [{ ...ws('ok'), hostId: 'wsl:Ubuntu' }]) })
-  assert.deepEqual(await wsl.request('memory.view'), { project: null, workspace: 'ok', remote: true })
-  await wsl.deactivate()
+test('a workspace on an SSH host: said as such, never « remembers nothing »', async () => {
+  const ssh = await mountWorker(main, { host: host('ok', {}, [{ ...ws('ok'), hostId: 'ssh-box' }]) })
+  assert.deepEqual(await ssh.request('memory.view'), { project: null, workspace: 'ok', remote: true })
+  await ssh.deactivate()
   const here = await mountWorker(main, { host: host('ok', {}, [{ ...ws('ok'), hostId: 'local' }]) })
   assert.equal((await here.request('memory.view')).project?.slug, '-demo-ok')
   await here.deactivate()

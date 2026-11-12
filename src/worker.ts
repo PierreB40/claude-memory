@@ -5,10 +5,11 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, readableBody, toVerify, verifyCount, writeDefects, type MemoryFile } from './audit.ts'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
-import { candidateSlugs, isRemote, launchOf, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { candidateSlugs, launchOf, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
 import { langOf, systemLang, words, type Lang, type Words } from './i18n.ts'
 import type { PanelView, ProjectView } from './protocol.ts'
-import { memoryDir, presentOnDisk, projectsRoot, readCheckout, readGitFile, readMemory, readMemoryFolder, type CheckoutFacts } from './store.ts'
+import { isRemote, linuxHomeOf, uncOf, wslOf } from './place.ts'
+import { memoryDir, presentOnDisk, projectsRoot, readCheckout, readGitFile, readMemory, readMemoryFolder, wslHome, type CheckoutFacts } from './store.ts'
 
 const STATUS = 'health'
 const unseenKey = (slug: string): string => `unseen:${slug}`
@@ -78,8 +79,50 @@ function learnOwner(orca: OrcaWorkerApi, terminalId: string | undefined, workspa
   return true
 }
 
+/**
+ * Where a workspace is, seen two ways: by the worker, which reads the files, and by the Claude
+ * working there, which names paths in its tool calls and needs them in its prompt. The same here;
+ * on WSL, the worker reads through the `\\wsl.localhost` share what Claude sees as Linux paths.
+ */
+interface Place {
+  /** The checkout, as the worker reads it. */
+  checkout: string
+  /** The checkout, as Claude there names it: what its project folder is named after. */
+  path: string
+  /** Claude Code's projects folder, as the worker reads it. */
+  root: string
+  /** The same folder, as Claude there names it. */
+  agentRoot: string
+}
+
+/** Null on SSH, or on a WSL distribution whose home cannot be found. */
+async function placeOf(orca: OrcaWorkerApi, w: WorkspaceInfo): Promise<Place | null> {
+  if (isRemote(w.hostId)) return null
+  const wsl = wslOf(w.path, w.hostId ?? null)
+  if (!wsl) {
+    const root = await rootOf(orca)
+    return { checkout: w.path, path: w.path, root, agentRoot: root }
+  }
+  const home = linuxHomeOf(wsl.linux) ?? (await wslHome(wsl))
+  if (!home) return null
+  const agentRoot = `${home === '/' ? '' : home}/.claude/projects`
+  return { checkout: uncOf(wsl), path: wsl.linux, root: uncOf({ distro: wsl.distro, linux: agentRoot }), agentRoot }
+}
+
+/** The projects folder each project slug was found in: the panel names a project by slug only. */
+const roots = new Map<string, Pick<Place, 'root' | 'agentRoot'>>()
+async function rootOfSlug(orca: OrcaWorkerApi, slug: string): Promise<string> {
+  return roots.get(slug)?.root ?? (await rootOf(orca))
+}
+
+/** A memory folder as Claude there names it: Linux paths stay Linux on WSL. */
+const agentMemoryDir = (slug: string, place: Pick<Place, 'root' | 'agentRoot'>): string =>
+  place.agentRoot === place.root ? memoryDir(slug, place.root) : `${place.agentRoot}/${slug}/memory`
+
 interface Known extends WorkspaceInfo {
   gitFile: string | null
+  /** Null: on another host, out of reach. */
+  place: Place | null
 }
 
 /** The focused workspace, matched among every workspace Orca knows; and its name, matched or not. */
@@ -90,8 +133,10 @@ async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known |
   ])
   if (!ctx) return { focused: null, name: null, all }
   const match = matchWorkspace(ctx, all, owners)
-  const gitFile = match && !isRemote(match) ? await readGitFile(match.path) : null
-  return { focused: match ? { ...match, gitFile } : null, name: ctx.displayName, all }
+  if (!match) return { focused: null, name: ctx.displayName, all }
+  const place = await placeOf(orca, match)
+  const gitFile = place ? await readGitFile(place.checkout) : null
+  return { focused: { ...match, gitFile, place }, name: ctx.displayName, all }
 }
 
 const gitCache = new Map<string, { at: number; facts: Promise<CheckoutFacts | null> }>()
@@ -135,35 +180,47 @@ function trackingSince(orca: OrcaWorkerApi, slug: string): Promise<number> {
   })
 }
 
+let lastLog = ''
+function logOnce(orca: OrcaWorkerApi, line: string): void {
+  if (line === lastLog) return
+  lastLog = line
+  orca.log(line)
+}
+
 const lastSegment = (path: string): string => path.split('/').filter(Boolean).pop() ?? path
 
 /** The focused workspace's project, if it has one: like every Orca sidebar tab, never another. */
 async function view(orca: OrcaWorkerApi): Promise<PanelView & { focused: Known | null }> {
   const { focused, name } = await focusedWorkspace(orca)
   if (!focused) return { project: null, workspace: name, unmatched: name !== null, focused: null }
-  if (isRemote(focused)) return { project: null, workspace: focused.name, remote: true, focused }
-  const root = await rootOf(orca)
+  const place = focused.place
+  if (!place) return { project: null, workspace: focused.name, remote: true, focused }
   let slug: string | null = null
   let files: MemoryFile[] = []
-  for (const candidate of candidateSlugs(focused.path, focused.gitFile)) {
-    files = await readMemoryFolder(candidate, root).catch(() => [])
+  for (const candidate of candidateSlugs(place.path, focused.gitFile)) {
+    files = await readMemoryFolder(candidate, place.root).catch(() => [])
     if (files.some((f) => f.file !== 'MEMORY.md')) {
       slug = candidate
       break
     }
   }
-  if (!slug) return { project: null, workspace: focused.name, focused }
-  const { facts, repo } = await repoFacts(focused.path, files)
+  if (!slug) {
+    // What `orca plugin logs` shows when the panel says Claude remembers nothing: where it looked.
+    logOnce(orca, `no memory for ${focused.path} (host ${focused.hostId ?? 'none'}): tried ${candidateSlugs(place.path, focused.gitFile).join(', ')} in ${place.root}`)
+    return { project: null, workspace: focused.name, focused }
+  }
+  roots.set(slug, place)
+  const { facts, repo } = await repoFacts(place.checkout, files)
   const result = audit(files, { ...DEFAULT_OPTIONS, repo })
   const present = new Set(result.memories.map((m) => m.file))
-  const main = focused.gitFile ? mainCheckoutOf(focused.gitFile, focused.path) : null
+  const main = focused.gitFile ? mainCheckoutOf(focused.gitFile, place.path) : null
   return {
     workspace: focused.name,
     focused,
     project: {
       ...result,
       slug,
-      label: lastSegment(main ?? focused.path),
+      label: lastSegment(main ?? place.path),
       branch: facts?.branch ?? null,
       base: facts?.base?.replace(/^origin\//, '') ?? null,
       unseen: (await listOf(orca, unseenKey(slug))).filter((f) => present.has(f)),
@@ -209,10 +266,10 @@ async function focusMayHaveResolved(orca: OrcaWorkerApi, terminalId: string | un
 /** Always a NEW Claude in its own terminal: an idle-looking agent may be a conversation in progress. */
 async function handOver(orca: OrcaWorkerApi): Promise<{ count: number; workspace: string }> {
   const { project: p, focused } = await view(orca)
-  if (!p || !focused) throw new Error(t().noMemoryHere)
+  if (!p || !focused?.place) throw new Error(t().noMemoryHere)
   const count = verifyCount(p)
   if (count === 0) throw new Error(t().nothingToDo)
-  const prompt = t().prompt(memoryDir(p.slug, await rootOf(orca)), toVerify(p), p.indexProblems)
+  const prompt = t().prompt(agentMemoryDir(p.slug, focused.place), toVerify(p), p.indexProblems)
   const launch = launchOf(platform(), focused.id, t().terminalTitle, prompt)
   const { terminalId } =
     launch.method === 'agent.launch' ? await orca.host.call('agent.launch', launch.params) : await orca.host.call('terminal.create', launch.params)
@@ -232,14 +289,13 @@ async function recordRead(orca: OrcaWorkerApi, slug: string, file: string): Prom
   })
 }
 
-async function recordWrite(orca: OrcaWorkerApi, memory: { slug: string; file: string; index: boolean }, workspaceId: string | null): Promise<void> {
+async function recordWrite(orca: OrcaWorkerApi, memory: { slug: string; file: string; index: boolean }, root: string, checkout: string | null): Promise<void> {
   if (memory.index) {
     // The index line that follows a new memory: no news, but the panel and the bar move on.
     orca.panels.post('memory.changed', { slug: memory.slug, file: memory.file })
     await refreshStatus(orca)
     return
   }
-  const root = await rootOf(orca)
   const files = await readMemoryFolder(memory.slug, root).catch(() => [])
   // A write that failed leaves no file: nothing was learned.
   if (!files.some((f) => f.file === memory.file)) return
@@ -248,8 +304,6 @@ async function recordWrite(orca: OrcaWorkerApi, memory: { slug: string; file: st
     if (!unseen.includes(memory.file)) await orca.storage.set(unseenKey(memory.slug), [...unseen, memory.file])
   })
   // The writing agent's own workspace holds the code the memory speaks of.
-  const { all } = await focusedWorkspace(orca)
-  const checkout = all.find((w) => w.id === workspaceId)?.path ?? null
   const { repo } = checkout ? await repoFacts(checkout, files) : { repo: null }
   const written = audit(files, { ...DEFAULT_OPTIONS, repo }).memories.find((m) => m.file === memory.file)
   const defects = written ? writeDefects(written) : null
@@ -271,7 +325,7 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   orca.panels.handle('memory.read', async ({ slug, file, locale }) => {
     await heard(orca, locale)
-    const root = await rootOf(orca)
+    const root = await rootOfSlug(orca, slug)
     const files = await readMemoryFolder(slug, root)
     return { body: readableBody(bodyOf(await readMemory(slug, file, root)), audit(files).memories, t()) }
   })
@@ -306,13 +360,25 @@ export default function activate(orca: OrcaWorkerApi): void {
     const consulted = written ? null : readPath(event.tool, event.input)
     if (!written && !consulted) return
     void (async () => {
-      const memory = memoryOfPath((written ?? consulted) as string, await rootOf(orca))
-      if (!memory) return
+      const path = (written ?? consulted) as string
+      if (!/[/\\]memory[/\\][^/\\]+\.md$/.test(path)) return
+      // The agent's workspace says where its Claude keeps memory: on WSL, in the Linux home.
+      const { workspaces } = event.workspaceId ? await orca.host.call('workspace.list').catch(() => ({ workspaces: [] })) : { workspaces: [] }
+      const own = workspaces.find((w) => w.id === event.workspaceId)
+      const place = own ? await placeOf(orca, own) : null
+      const local = await rootOf(orca)
+      const found = [place, { root: local, agentRoot: local }]
+        .filter((r): r is Pick<Place, 'root' | 'agentRoot'> => r !== null)
+        .map((r) => ({ r, memory: memoryOfPath(path, r.agentRoot) }))
+        .find((x) => x.memory !== null)
+      if (!found?.memory) return
+      const { memory, r } = found
+      roots.set(memory.slug, r)
       if (consulted) {
         if (!memory.index) await recordRead(orca, memory.slug, memory.file)
         return
       }
-      await recordWrite(orca, memory, event.workspaceId)
+      await recordWrite(orca, memory, r.root, place?.checkout ?? null)
     })().catch(() => undefined)
   })
 

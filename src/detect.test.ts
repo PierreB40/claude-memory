@@ -1,6 +1,6 @@
 import { assert, test } from 'orca/testing'
 import { execFileSync } from 'node:child_process'
-import { candidateSlugs, claudeCommand, isRemote, launchOf, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, resolvePath, slugOf, writtenPath } from './detect.ts'
+import { candidateSlugs, claudeCommand, launchOf, mainCheckoutOf, matchWorkspace, memoryOfPath, readPath, resolvePath, slugOf, writtenPath } from './detect.ts'
 
 const ws = (id: string, name: string, path: string, branch: string | null) => ({ id, name, path, branch })
 
@@ -42,12 +42,6 @@ test('Windows: a worktree maps to its main checkout, a memory is recognised what
   assert.deepEqual(memoryOfPath('C:\\Users\\me\\.claude\\projects\\C--Users-me-app\\memory\\regle.md', root), { slug: 'C--Users-me-app', file: 'regle.md', index: false })
   assert.deepEqual(memoryOfPath('c:/users/me/.claude/projects/C--Users-me-app/memory/MEMORY.md', root), { slug: 'C--Users-me-app', file: 'MEMORY.md', index: true })
   assert.equal(memoryOfPath('C:\\Users\\me\\app\\memory\\regle.md', root), null)
-})
-
-test('a workspace on WSL or SSH is remote; this machine is local', () => {
-  assert.equal(isRemote({ hostId: null }), false)
-  assert.equal(isRemote({ hostId: 'local' }), false)
-  assert.equal(isRemote({ hostId: 'wsl:Ubuntu' }), true)
 })
 
 test('verify: the prompt on the command line, but Orca launches Claude itself on Windows', () => {

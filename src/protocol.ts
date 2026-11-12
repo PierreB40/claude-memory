@@ -26,7 +26,7 @@ export interface PanelView {
   project: ProjectView | null
   workspace: string | null
   unmatched?: boolean
-  /** The focused workspace is on WSL or SSH: its memory is there, out of the plugin's reach. */
+  /** The focused workspace is on an SSH host: its memory is there, out of the plugin's reach. */
   remote?: boolean
 }
 

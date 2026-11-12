@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- WSL on Windows: a workspace in a WSL distribution finds its Claude's memory in the Linux home,
+  read through the `\\wsl.localhost` share, with its folder named after the Linux path as Claude
+  in WSL names it. `git` runs inside the distribution, where Git for Windows would refuse the
+  repository; *Verify* gives Claude the Linux path of its memory. Only SSH workspaces are still out
+  of reach.
+
 ## 0.4.0
 
 - Two workspaces of the same name on the same branch (every repository's main checkout is

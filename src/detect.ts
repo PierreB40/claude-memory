@@ -5,15 +5,10 @@ export interface WorkspaceInfo {
   name: string
   path: string
   branch: string | null
-  /** Orca's host for it: null or `local` here, another id for WSL or SSH. */
+  /** Orca's host for it: null or `local` here, `wsl:<distro>`, or an SSH host's id. */
   hostId?: string | null
 }
 
-/**
- * On WSL or SSH, a workspace's checkout and its Claude's memory are on that host, out of the
- * worker's reach: saying so beats claiming Claude remembers nothing.
- */
-export const isRemote = (w: Pick<WorkspaceInfo, 'hostId'>): boolean => Boolean(w.hostId) && w.hostId !== 'local'
 
 export interface FocusedContext {
   branch: string

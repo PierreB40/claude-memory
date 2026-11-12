@@ -18,7 +18,7 @@ An independent project, not made or endorsed by Anthropic or Stably.*
 ## Install
 
 Requirements: Orca **1.4.248** or newer, [Claude Code](https://claude.com/claude-code), `git`, and
-local workspaces on macOS, Linux or Windows (not WSL or SSH: see [Limits](#limits)).
+workspaces on macOS, Linux, Windows or WSL (not SSH: see [Limits](#limits)).
 
 In Orca, open **Settings → Plugins → Add plugin → From Git URL** and enter:
 
@@ -105,15 +105,15 @@ Clicking it shows or hides the sidebar.
   `main`) are told apart only by their terminals. Orca tells a panel only the focused workspace's
   name, branch and terminals, so the panel knows which one it is once an agent has run in one of
   them. Until then, it says so instead of guessing.
-- **Local workspaces only: not WSL, not SSH.** On a WSL distribution or an SSH host, the code and
-  Claude's memory (`~/.claude/projects` there) stay on that host, and the plugin reads only the
-  machine Orca runs on. For such a workspace:
-  - the panel says it is on another host, and the status bar stays hidden;
-  - *Verify* is not offered;
-  - Orca does not hook the agents running there yet, so their memory writes bring no notification
-    and their reads are not counted.
-
-  Claude Code run natively on Windows, in a local workspace, is supported.
+- **WSL: read through the `\\wsl.localhost` share.** For a workspace in a WSL distribution, the
+  plugin reads Claude's memory in the Linux home (`~/.claude/projects` there, found from the
+  workspace's `/home/<user>` path, else asked of the distribution), and runs `git` inside the
+  distribution with `wsl.exe`. A `CLAUDE_CONFIG_DIR` set inside WSL is not followed. Notifications
+  and read counts need Orca to report the tool calls of agents running in WSL, which it may not do
+  yet: the panel and the status bar work without them.
+- **Not SSH.** On an SSH host, the code and Claude's memory stay on that machine and the plugin
+  reads only the one Orca runs on: the panel says the workspace is on another host, the status bar
+  stays hidden, and *Verify* is not offered.
 - **Verify on Windows.** On macOS and Linux, *Verify* passes the request on the command line
   (`claude '…'`). On Windows, where terminals are PowerShell or cmd, Orca launches Claude and sends
   the request once it is ready.
