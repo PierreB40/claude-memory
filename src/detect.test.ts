@@ -1,6 +1,6 @@
 import { assert, test } from 'orca/testing'
 import { execFileSync } from 'node:child_process'
-import { candidateSlugs, claudeCommand, launchOf, mainCheckoutOf, matchWorkspace, namesForTwins, twinsOf, memoryOfPath, readPath, resolvePath, slugOf, writtenPath } from './detect.ts'
+import { candidateSlugs, claudeCommand, launchOf, mainCheckoutOf, matchWorkspace, twinsOf, memoryOfPath, readPath, resolvePath, slugOf, writtenPath } from './detect.ts'
 
 const ws = (id: string, name: string, path: string, branch: string | null) => ({ id, name, path, branch })
 
@@ -25,19 +25,31 @@ test('two alike are told apart by a terminal an agent event tied to one of them'
   assert.equal(matchWorkspace({ displayName: 'main', branch: 'main', terminals: [{ id: 't-a' }, { id: 't-b' }] }, list, both), null, 'still two: never a guess')
 })
 
-test('look-alikes are named after their projects, never as another workspace is', () => {
-  const list = [
-    { ...ws('1', 'main', '/dev/shop', 'main'), project: 'shop' },
-    { ...ws('2', 'main', '/dev/blog', 'main'), project: null },
-    { ...ws('3', 'main', '/dev/infra', 'main'), project: 'infra' },
-    ws('4', 'infra', '/orca/infra/x', 'feature')
+test('look-alikes told apart by the folder their terminals show, the deepest when nested', () => {
+  const unc = (p: string) => `\\\\wsl.localhost\\Ubuntu${p.replace(/\//g, '\\')}`
+  const v8 = [
+    { ...ws('ui', 'v8', unc('/home/pierre/Dev/akolade/akolade-ui'), 'v8'), project: 'akolade-ui' },
+    { ...ws('api', 'v8', unc('/home/pierre/Dev/akolade/akolade-api'), 'v8'), project: 'akolade-api' },
+    { ...ws('db', 'v8', unc('/home/pierre/Dev/akolade/akolade-db'), 'v8'), project: 'akolade-db' }
   ]
-  const ctx = { displayName: 'main', branch: 'main' }
-  assert.deepEqual(twinsOf(ctx, list).map((w) => w.id), ['1', '2', '3'])
-  assert.deepEqual([...namesForTwins(twinsOf(ctx, list), list).values()], ['shop', 'blog', 'infra (dev)'])
-  assert.deepEqual(twinsOf({ displayName: 'infra', branch: 'feature' }, list), [], 'one workspace fits: no twins')
-  const same = [{ ...ws('a', 'main', '/x/app', 'main'), project: 'app' }, { ...ws('b', 'main', '/y/app', 'main'), project: 'app' }]
-  assert.deepEqual([...namesForTwins(same, same).values()], ['app', 'app (y)'])
+  const ctx = (title?: string) => ({ displayName: 'v8', branch: 'v8', terminals: [{ id: 't', ...(title ? { title } : {}) }] })
+  assert.equal(matchWorkspace(ctx('Pierre@PC-PBL-W11: ~/Dev/akolade/akolade-db'), v8)?.id, 'db')
+  assert.equal(matchWorkspace(ctx('Pierre@PC-PBL-W11: ~/Dev/akolade/akolade-db/src/app'), v8)?.id, 'db', 'a subfolder is still it')
+  assert.equal(matchWorkspace(ctx('Pierre@PC-PBL-W11: ~/Dev/akolade/akolade-dbx'), v8), null, 'a longer name is another folder')
+  assert.equal(matchWorkspace(ctx('✳ Claude Code'), v8), null, 'no folder shown: still ambiguous')
+  assert.deepEqual(twinsOf(ctx(), v8).map((w) => w.id), ['ui', 'api', 'db'])
+
+  const nested = [ws('root', 'AKO-9589', '/home/pierre/Dev/akolade', 'AKO-9589'), ws('db', 'AKO-9589', '/home/pierre/Dev/akolade/akolade-db', 'AKO-9589')]
+  const at = (title: string) => ({ displayName: 'AKO-9589', branch: 'AKO-9589', terminals: [{ id: 't', title }] })
+  assert.equal(matchWorkspace(at('Pierre@PC: ~/Dev/akolade'), nested)?.id, 'root')
+  assert.equal(matchWorkspace(at('Pierre@PC: ~/Dev/akolade/akolade-db'), nested)?.id, 'db')
+
+  const mac = [ws('a', 'main', '/Users/me/Dev/shop', 'main'), ws('b', 'main', '/Users/me/Dev/blog', 'main')]
+  const two = (...titles: string[]) => ({ displayName: 'main', branch: 'main', terminals: titles.map((title, i) => ({ id: `t${i}`, title })) })
+  assert.equal(matchWorkspace(two('zsh: /Users/me/Dev/blog', '✳ Claude Code'), mac)?.id, 'b')
+  assert.equal(matchWorkspace(two('~/Dev/shop', '~/Dev/blog'), mac), null, 'terminals disagree: never a guess')
+  const win = [ws('w', 'main', 'C:\\Users\\me\\shop', 'main'), ws('x', 'main', 'C:\\Users\\me\\blog', 'main')]
+  assert.equal(matchWorkspace(two('PS C:\\Users\\me\\blog>'), win)?.id, 'x')
 })
 
 test('a linked worktree maps to its main checkout, absolute or relative gitdir', () => {

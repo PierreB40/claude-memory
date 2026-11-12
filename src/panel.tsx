@@ -145,12 +145,12 @@ async function verify(): Promise<void> {
   }
 }
 
-/** The look-alike workspaces take their projects' names: Orca then says which one is in front. */
-async function nameTwins(): Promise<void> {
+/** The person says which look-alike is in front: the worker remembers it by its terminals. */
+async function pickTwin(workspaceId: string): Promise<void> {
   set(busy, true)
   set(said, null)
   try {
-    await plugin.request('workspace.disambiguate', locale())
+    await plugin.request('workspace.pick', { workspaceId, ...locale() })
     await load()
   } catch (e) {
     set(said, { ok: false, text: message(e) })
@@ -476,20 +476,32 @@ export default function Panel() {
   }
   if (!s.workspace) return <EmptyState icon="folder" title={w.noWorkspace.title} description={w.noWorkspace.description} />
   if (s.unmatched) {
-    const a = w.ambiguous(s.workspace)
     const feedback = read(said)
+    if (!s.twins?.length) {
+      const a = w.ambiguous(s.workspace)
+      return <EmptyState icon="folder" title={a.title} description={a.description} />
+    }
+    // Asked like Orca's own pickers: one row per look-alike, its project and where it lives.
+    const q = w.whichOne(s.workspace)
     return (
-      <EmptyState icon="folder" title={a.title} description={a.description}>
-        {s.twins?.length ? (
-          <Stack gap="sm">
-            <Text size="sm">{w.twins(s.twins)}</Text>
-            <Button variant="solid" size="sm" disabled={read(busy)} onPress={nameTwins}>
-              {read(busy) ? w.namingTwins : w.nameTwins}
-            </Button>
-          </Stack>
+      <Stack gap="sm">
+        <Stack gap="none">
+          <Text weight="semibold">{q.title}</Text>
+          <Text size="xs" muted>
+            {q.description}
+          </Text>
+        </Stack>
+        <List label={q.title}>
+          {s.twins.map((c) => (
+            <ListItem icon="folder" title={c.label} description={c.detail} disabled={read(busy)} onPress={() => void pickTwin(c.id)} />
+          ))}
+        </List>
+        {feedback && !feedback.ok ? (
+          <Text size="xs" tone="danger">
+            {feedback.text}
+          </Text>
         ) : null}
-        {feedback && !feedback.ok ? <Text size="sm">{feedback.text}</Text> : null}
-      </EmptyState>
+      </Stack>
     )
   }
   if (s.remote) {

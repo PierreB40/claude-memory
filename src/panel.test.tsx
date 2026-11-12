@@ -159,8 +159,10 @@ test('no workspace, or an ambiguous one, says which', async () => {
   assert.ok(drawn(await mountWith([{ project: null, workspace: null }]).view).includes('Aucun workspace ouvert'))
   assert.ok(drawn(await mountWith([{ project: null, workspace: 'main', unmatched: true }]).view).includes('Workspace « main » ambigu'))
   assert.ok(drawn(await mountWith([{ project: null, workspace: 'api', remote: true }]).view).includes('« api » est sur un autre hôte'))
-  const twins = drawn(await mountWith([{ project: null, workspace: 'main', unmatched: true, twins: ['shop', 'infra'] }]).view)
-  assert.ok(twins.includes('Ils s’appelleraient : shop, infra.') && twins.includes('Les nommer d’après leur projet'))
+  const twins = drawn(
+    await mountWith([{ project: null, workspace: 'v8', unmatched: true, twins: [{ id: 'a', label: 'akolade-ui', detail: '~/Dev/akolade/akolade-ui' }, { id: 'b', label: 'akolade-db', detail: '~/Dev/akolade/akolade-db' }] }]).view
+  )
+  assert.ok(twins.includes('Quel « v8 » ?') && twins.includes('akolade-db') && twins.includes('~/Dev/akolade/akolade-ui'))
 })
 
 test('in English when Orca is', async () => {

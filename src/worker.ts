@@ -5,7 +5,7 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, readableBody, toVerify, verifyCount, writeDefects, type MemoryFile } from './audit.ts'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
-import { candidateSlugs, launchOf, mainCheckoutOf, matchWorkspace, namesForTwins, twinsOf, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { candidateSlugs, launchOf, mainCheckoutOf, matchWorkspace, pathForms, twinsOf, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
 import { langOf, systemLang, words, type Lang, type Words } from './i18n.ts'
 import type { PanelView, ProjectView } from './protocol.ts'
 import { isRemote, linuxHomeOf, uncOf, wslOf } from './place.ts'
@@ -132,8 +132,11 @@ async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known |
     orca.host.call('workspace.list').catch(() => ({ workspaces: [] }))
   ])
   if (!ctx) return { focused: null, name: null, all, twins: [] }
-  const match = matchWorkspace(ctx, all, owners)
+  const pinnedOne = pinned && pinned.key === contextKey(ctx) ? all.find((w) => w.id === pinned?.id) : undefined
+  const match = matchWorkspace(ctx, all, owners) ?? pinnedOne ?? null
   if (!match) return { focused: null, name: ctx.displayName, all, twins: twinsOf(ctx, all, owners) }
+  // Known by one terminal, or by the folder its title shows: its other terminals are its own too.
+  for (const { id } of ctx.terminals) learnOwner(orca, id, match.id)
   const place = await placeOf(orca, match)
   const gitFile = place ? await readGitFile(place.checkout) : null
   return { focused: { ...match, gitFile, place }, name: ctx.displayName, all, twins: [] }
@@ -191,12 +194,11 @@ const lastSegment = (path: string): string => path.split('/').filter(Boolean).po
 
 /** The focused workspace's project, if it has one: like every Orca sidebar tab, never another. */
 async function view(orca: OrcaWorkerApi): Promise<PanelView & { focused: Known | null }> {
-  const { focused, name, all, twins } = await focusedWorkspace(orca)
+  const { focused, name, twins } = await focusedWorkspace(orca)
   if (!focused) {
     if (name === null) return { project: null, workspace: null, focused: null }
-    // Renaming needs Orca's `workspace.rename`; without it, only an agent's terminal can tell.
-    const names = twins.length && orca.host.has('workspace.rename') ? [...namesForTwins(twins, all).values()] : []
-    return { project: null, workspace: name, unmatched: true, ...(names.length ? { twins: names } : {}), focused: null }
+    const choices = twins.map((w) => ({ id: w.id, label: w.project?.trim() || lastSegment(pathForms(w.path, w.hostId ?? null)[0] ?? w.path), detail: pathForms(w.path, w.hostId ?? null).at(-1) ?? w.path }))
+    return { project: null, workspace: name, unmatched: true, ...(choices.length ? { twins: choices } : {}), focused: null }
   }
   const place = focused.place
   if (!place) return { project: null, workspace: focused.name, remote: true, focused }
@@ -268,16 +270,19 @@ async function focusMayHaveResolved(orca: OrcaWorkerApi, terminalId: string | un
   await refreshStatus(orca)
 }
 
-/** Each look-alike workspace takes its project's name, which no other workspace has. */
-async function disambiguate(orca: OrcaWorkerApi): Promise<{ renamed: number }> {
-  const { all, twins } = await focusedWorkspace(orca)
-  let renamed = 0
-  for (const [id, name] of namesForTwins(twins, all)) {
-    if (all.find((w) => w.id === id)?.name === name) continue
-    await orca.host.call('workspace.rename', { workspaceId: id, name })
-    renamed++
-  }
-  return { renamed }
+/**
+ * The person said which look-alike is in front. Its terminals now belong to it, for good; with no
+ * terminal to tie, the choice holds until the focus moves.
+ */
+let pinned: { key: string; id: string } | null = null
+const contextKey = (ctx: { displayName: string; branch: string; terminals: { id: string }[] }): string =>
+  [ctx.displayName, ctx.branch, ...ctx.terminals.map((t) => t.id).sort()].join('\u0000')
+async function pick(orca: OrcaWorkerApi, workspaceId: string): Promise<{ ok: true }> {
+  const [ctx, { workspaces }] = await Promise.all([orca.host.call('workspace.readContext'), orca.host.call('workspace.list')])
+  if (!ctx || !twinsOf(ctx, workspaces, owners).some((w) => w.id === workspaceId)) throw new Error(t().pickGone)
+  for (const { id } of ctx.terminals) learnOwner(orca, id, workspaceId)
+  pinned = { key: contextKey(ctx), id: workspaceId }
+  return { ok: true }
 }
 
 /** Always a NEW Claude in its own terminal: an idle-looking agent may be a conversation in progress. */
@@ -340,9 +345,9 @@ export default function activate(orca: OrcaWorkerApi): void {
     return { project, workspace, ...(unmatched ? { unmatched } : {}), ...(twins ? { twins } : {}), ...(remote ? { remote } : {}) }
   })
 
-  orca.panels.handle('workspace.disambiguate', async (input) => {
-    await heard(orca, input?.locale)
-    const done = await disambiguate(orca)
+  orca.panels.handle('workspace.pick', async ({ workspaceId, locale }) => {
+    await heard(orca, locale)
+    const done = await pick(orca, workspaceId)
     await refreshStatus(orca)
     return done
   })
@@ -411,7 +416,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   let last: string | undefined
   orca.events.on('workspace.changed', ({ context }) => {
     focusedTerminals = new Set(context?.terminals.map((t) => t.id) ?? [])
-    const key = context ? [context.displayName, context.branch, ...context.terminals.map((t) => t.id).sort()].join('\u0000') : ''
+    const key = context ? contextKey(context) : ''
+    // A pick holds while nothing changes; terminals tied by it keep telling afterwards.
+    if (pinned && pinned.key !== key) pinned = null
     if (key === last) return
     last = key
     return refreshStatus(orca)

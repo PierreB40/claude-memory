@@ -102,10 +102,10 @@ Clicking it shows or hides the sidebar.
 - **Code checks see the focused workspace and the default branch.** A file that exists only on a
   third branch reads as missing.
 - **Two workspaces with the same name on the same branch** (every main checkout is `main` on
-  `main`) are told apart only by their terminals. Orca tells a panel only the focused workspace's
-  name, branch and terminals, so the panel knows which one it is once an agent has run in one of
-  them. Until then, it says so instead of guessing, and offers to rename the look-alikes after
-  their projects (`shop`, `infra`…): once they differ, Orca says which one is in front.
+  `main`, or one `v8` per sub-project). Orca tells a plugin only the focused workspace's name,
+  branch and terminals, so the panel tells them apart by the folder a terminal's title shows
+  (`me@pc: ~/Dev/shop`, as bash and zsh set it), or by a terminal an agent ran in. When neither
+  tells, it asks which one it is, and remembers the answer through that workspace's terminals.
 - **WSL: read through the `\\wsl.localhost` share.** For a workspace in a WSL distribution, the
   plugin reads Claude's memory in the Linux home (`~/.claude/projects` there, found from the
   workspace's `/home/<user>` path, else asked of the distribution), and runs `git` inside the
