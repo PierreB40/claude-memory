@@ -290,7 +290,7 @@ function Lists({ p, which }: { p: ProjectView; which: TabId }) {
   )
 }
 
-function Header({ p }: { p: ProjectView }) {
+function Header({ p, noVerify }: { p: ProjectView; noVerify?: boolean }) {
   const w = t()
   const count = verifyCount(p)
   const merge = atMerge(p).length
@@ -308,7 +308,7 @@ function Header({ p }: { p: ProjectView }) {
           </Text>
         </Stack>
         <Row gap="none" align="center">
-          {count ? (
+          {count && !noVerify ? (
             <Button variant="ghost" size="sm" icon="agent" disabled={read(busy)} tooltip={w.verifyTooltip} onPress={verify}>
               {read(busy) ? w.verifyStarting : w.verify}
             </Button>
@@ -330,13 +330,13 @@ function Header({ p }: { p: ProjectView }) {
   )
 }
 
-function Main({ p }: { p: ProjectView }) {
+function Main({ p, noVerify }: { p: ProjectView; noVerify?: boolean }) {
   const w = t()
   const which: TabId = read(tab) ?? defaultTab(p)
   return (
     <Box direction="column" height="100%">
       <Box direction="column" gap="sm" paddingY="xs" shrink={false}>
-        <Header p={p} />
+        <Header p={p} noVerify={noVerify} />
         <Tabs label={w.view} value={which} onChange={showTab}>
           <Tab value="verify" label={`${w.tabVerify} ${verifyCount(p)}`} />
           <Tab value="recent" label={`${w.tabRecent} ${recentOf(p).length}`} />
@@ -514,5 +514,5 @@ export default function Panel() {
   }
   const o = read(opened)
   const m = o ? s.project.memories.find((x) => x.file === o.file) : undefined
-  return o && m ? <Detail p={s.project} m={m} body={o.body} /> : <Main p={s.project} />
+  return o && m ? <Detail p={s.project} m={m} body={o.body} /> : <Main p={s.project} noVerify={s.noVerify} />
 }

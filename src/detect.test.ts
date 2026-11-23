@@ -1,6 +1,6 @@
 import { assert, test } from 'orca/testing'
 import { execFileSync } from 'node:child_process'
-import { candidateSlugs, claudeCommand, launchOf, mainCheckoutOf, matchWorkspace, twinsOf, memoryOfPath, readPath, resolvePath, slugOf, writtenPath } from './detect.ts'
+import { candidateSlugs, claudeCommand, contextPath, launchOf, mainCheckoutOf, matchWorkspace, runtimeCandidate, twinsOf, memoryOfPath, readPath, resolvePath, slugOf, workspaceFromContext, writtenPath, type WorkspaceInfo } from './detect.ts'
 
 const ws = (id: string, name: string, path: string, branch: string | null) => ({ id, name, path, branch })
 
@@ -93,4 +93,33 @@ test('the Claude command line keeps the prompt intact through a shell', () => {
   const prompt = "Corrige `src/a.ts` (l'index), $HOME et \"guillemets\" ; rien d'autre."
   const echoed = execFileSync('sh', ['-c', claudeCommand(prompt).replace(/^claude /, 'printf %s ')], { encoding: 'utf8' })
   assert.equal(echoed, prompt)
+})
+
+test('the Linux path inside the workspace id Orca gives a WSL-runtime context', () => {
+  assert.equal(contextPath('e0f3::/home/me/shop'), '/home/me/shop')
+  assert.equal(contextPath('e0f3::/home/me/my shop::workspace:9a1'), '/home/me/my shop')
+  assert.equal(contextPath('e0f3::D:\\Temp'), null, 'a Windows path is not WSL')
+  assert.equal(contextPath('e0f3::'), null)
+  assert.equal(contextPath('e0f3'), null)
+  assert.equal(contextPath(undefined), null)
+  assert.equal(contextPath('e0f3:://wsl.localhost/Ubuntu/home/me/shop'), null, 'a forward-slash UNC path is not a Linux path')
+})
+
+test('a workspace built from a context and the distro that holds its path', () => {
+  const ctx = { workspaceId: 'e0f3::/home/me/shop', branch: 'main', displayName: 'main' }
+  assert.deepEqual(workspaceFromContext(ctx, '/home/me/shop', 'Ubuntu'), {
+    id: 'e0f3::/home/me/shop', name: 'main', path: '/home/me/shop', branch: 'main', hostId: 'wsl:Ubuntu', viaContext: true
+  })
+})
+
+test('a Linux path in the context id is a runtime candidate only when no listed workspace is that one', () => {
+  const ctx = { workspaceId: 'e0f3::/home/me/shop', branch: 'main', displayName: 'main' }
+  const listed = (over: Partial<WorkspaceInfo>): WorkspaceInfo => ({ id: 'a1::/srv/other', name: 'x', path: '/srv/other', branch: 'main', ...over })
+  assert.equal(runtimeCandidate(ctx, []), '/home/me/shop')
+  assert.equal(runtimeCandidate(ctx, [listed({})]), '/home/me/shop', 'an unrelated listed workspace')
+  assert.equal(runtimeCandidate(ctx, [listed({ id: 'e0f3::/home/me/shop' })]), null, 'listed under the same id')
+  assert.equal(runtimeCandidate(ctx, [listed({ path: '/home/me/shop', hostId: 'ssh-1' })]), null, 'an SSH workspace with that path')
+  assert.equal(runtimeCandidate(ctx, [listed({ path: '\\\\wsl.localhost\\Ubuntu\\home\\me\\shop' })]), null, 'a listed WSL share of that path')
+  assert.equal(runtimeCandidate({ ...ctx, workspaceId: 'e0f3::D:\\Temp' }, []), null, 'a Windows path')
+  assert.equal(runtimeCandidate({ ...ctx, workspaceId: undefined }, []), null)
 })

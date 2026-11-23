@@ -30,6 +30,8 @@ export interface PanelView {
   twins?: { id: string; label: string; detail: string }[]
   /** The focused workspace is on an SSH host: its memory is there, out of the plugin's reach. */
   remote?: boolean
+  /** The focused workspace is one Orca's plugin host cannot start an agent in: no *Verify*. */
+  noVerify?: boolean
 }
 
 /** Orca's language (BCP-47), which only panels know: the worker speaks it from then on. */

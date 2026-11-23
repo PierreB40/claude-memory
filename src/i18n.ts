@@ -88,6 +88,7 @@ export interface Words {
   writeVerdict(title: string, defects: { missing: number; dead: number }): string
   noMemoryHere: string
   nothingToDo: string
+  noVerifyHere: string
   terminalTitle: string
   commandStarted(workspace: string, n: number): string
   prompt(dir: string, memories: readonly Memory[], index: readonly IndexProblem[]): string
@@ -212,6 +213,7 @@ const fr: Words = {
   },
   noMemoryHere: 'Ce workspace n’a aucune mémoire Claude.',
   nothingToDo: 'Rien à vérifier.',
+  noVerifyHere: 'Orca ne sait pas encore lancer un agent dans ce workspace depuis un plugin : lance Claude toi-même.',
   terminalTitle: 'Claude · mémoire',
   commandStarted: (w, n) => `Claude lancé dans « ${w} » avec ${count(n, 'élément', 'éléments')} à vérifier.`,
   prompt: (dir, memories, index) => {
@@ -331,6 +333,7 @@ const en: Words = {
   },
   noMemoryHere: 'This workspace has no Claude memory.',
   nothingToDo: 'Nothing to verify.',
+  noVerifyHere: 'Orca cannot start an agent in this workspace from a plugin yet: run Claude there yourself.',
   terminalTitle: 'Claude · memory',
   commandStarted: (w, n) => `Claude started in “${w}” with ${count(n, 'item', 'items')} to verify.`,
   prompt: (dir, memories, index) => {

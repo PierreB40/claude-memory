@@ -5,11 +5,11 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import { audit, bodyOf, citedPaths, DEFAULT_OPTIONS, readableBody, toVerify, verifyCount, writeDefects, type MemoryFile } from './audit.ts'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
-import { candidateSlugs, launchOf, mainCheckoutOf, matchWorkspace, pathForms, twinsOf, memoryOfPath, readPath, writtenPath, type WorkspaceInfo } from './detect.ts'
+import { candidateSlugs, launchOf, mainCheckoutOf, matchWorkspace, pathForms, runtimeCandidate, twinsOf, memoryOfPath, readPath, workspaceFromContext, writtenPath, type FocusedContext, type WorkspaceInfo } from './detect.ts'
 import { langOf, systemLang, words, type Lang, type Words } from './i18n.ts'
 import type { PanelView, ProjectView } from './protocol.ts'
 import { isRemote, linuxHomeOf, uncOf, wslOf } from './place.ts'
-import { memoryDir, presentOnDisk, projectsRoot, readCheckout, readGitFile, readMemory, readMemoryFolder, wslHome, type CheckoutFacts } from './store.ts'
+import { memoryDir, presentOnDisk, projectsRoot, readCheckout, readGitFile, readMemory, readMemoryFolder, wslDistroOf, wslHome, type CheckoutFacts } from './store.ts'
 
 const STATUS = 'health'
 const unseenKey = (slug: string): string => `unseen:${slug}`
@@ -125,6 +125,15 @@ interface Known extends WorkspaceInfo {
   place: Place | null
 }
 
+/** A workspace of Orca's WSL runtime: its id holds a Linux path, and `workspace.list` does not return it. */
+async function runtimeWorkspace(ctx: FocusedContext, all: WorkspaceInfo[]): Promise<WorkspaceInfo | null> {
+  if (platform() !== 'win32') return null
+  const linux = runtimeCandidate(ctx, all)
+  if (!linux) return null
+  const distro = await wslDistroOf(linux)
+  return distro ? workspaceFromContext(ctx, linux, distro) : null
+}
+
 /** The focused workspace, matched among every workspace Orca knows; and its name, matched or not. */
 async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known | null; name: string | null; all: WorkspaceInfo[]; twins: WorkspaceInfo[] }> {
   const [ctx, { workspaces: all }] = await Promise.all([
@@ -133,7 +142,7 @@ async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known |
   ])
   if (!ctx) return { focused: null, name: null, all, twins: [] }
   const pinnedOne = pinned && pinned.key === contextKey(ctx) ? all.find((w) => w.id === pinned?.id) : undefined
-  const match = matchWorkspace(ctx, all, owners) ?? pinnedOne ?? null
+  const match = (await runtimeWorkspace(ctx, all)) ?? matchWorkspace(ctx, all, owners) ?? pinnedOne ?? null
   if (!match) return { focused: null, name: ctx.displayName, all, twins: twinsOf(ctx, all, owners) }
   // Known by one terminal, or by the folder its title shows: its other terminals are its own too.
   for (const { id } of ctx.terminals) learnOwner(orca, id, match.id)
@@ -224,6 +233,7 @@ async function view(orca: OrcaWorkerApi): Promise<PanelView & { focused: Known |
   return {
     workspace: focused.name,
     focused,
+    ...(focused.viaContext ? { noVerify: true } : {}),
     project: {
       ...result,
       slug,
@@ -289,6 +299,7 @@ async function pick(orca: OrcaWorkerApi, workspaceId: string): Promise<{ ok: tru
 async function handOver(orca: OrcaWorkerApi): Promise<{ count: number; workspace: string }> {
   const { project: p, focused } = await view(orca)
   if (!p || !focused?.place) throw new Error(t().noMemoryHere)
+  if (focused.viaContext) throw new Error(t().noVerifyHere)
   const count = verifyCount(p)
   if (count === 0) throw new Error(t().nothingToDo)
   const prompt = t().prompt(agentMemoryDir(p.slug, focused.place), toVerify(p), p.indexProblems)
@@ -341,8 +352,8 @@ export default function activate(orca: OrcaWorkerApi): void {
   lang = systemLang()
   orca.panels.handle('memory.view', async (input) => {
     await heard(orca, input?.locale)
-    const { project, workspace, unmatched, twins, remote } = await view(orca)
-    return { project, workspace, ...(unmatched ? { unmatched } : {}), ...(twins ? { twins } : {}), ...(remote ? { remote } : {}) }
+    const { project, workspace, unmatched, twins, remote, noVerify } = await view(orca)
+    return { project, workspace, ...(unmatched ? { unmatched } : {}), ...(twins ? { twins } : {}), ...(remote ? { remote } : {}), ...(noVerify ? { noVerify } : {}) }
   })
 
   orca.panels.handle('workspace.pick', async ({ workspaceId, locale }) => {

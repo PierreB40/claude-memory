@@ -4,7 +4,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { MemoryFile } from './audit.ts'
-import { wslCommand, wslOf, type Wsl } from './place.ts'
+import { parseDistros, soleHolder, uncOf, withinMs, wslCommand, wslOf, type Wsl } from './place.ts'
 
 export interface ProjectSummary {
   /** Folder name under ~/.claude/projects, e.g. `-Users-me-Dev-app`. */
@@ -95,6 +95,30 @@ export function wslHome(w: Pick<Wsl, 'distro'>): Promise<string | null> {
     homes.set(key, home)
   }
   return home
+}
+const SHARE_TIMEOUT_MS = 2000
+const NO_ANSWER_TTL_MS = 30_000
+const holders = new Map<string, Promise<string | null>>()
+/**
+ * The running distribution whose file system holds this Linux path; null when `wsl.exe` fails, or
+ * none or several do. Orca's WSL runtime is necessarily running, and a stopped distribution is not
+ * started by looking at its share. One probe per path: a found distribution is kept, no answer
+ * (or a failure) only for a while.
+ */
+export function wslDistroOf(linux: string): Promise<string | null> {
+  const hit = holders.get(linux)
+  if (hit) return hit
+  const distro = probeDistro(linux).catch(() => null)
+  holders.set(linux, distro)
+  void distro.then((found) => {
+    if (!found) setTimeout(() => holders.delete(linux), NO_ANSWER_TTL_MS)
+  })
+  return distro
+}
+async function probeDistro(linux: string): Promise<string | null> {
+  const listed = await run('wsl.exe', ['-l', '-q', '--running'])
+  if (listed === null) return null
+  return soleHolder(parseDistros(listed), (d) => withinMs(stat(uncOf({ distro: d, linux })).then(() => true), SHARE_TIMEOUT_MS))
 }
 const nulSplit = (out: string): string[] => out.split('\0').filter(Boolean)
 

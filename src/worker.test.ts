@@ -85,6 +85,13 @@ test('a workspace on an SSH host: said as such, never « remembers nothing »', 
   await here.deactivate()
 })
 
+test('a WSL-style context id the list does not know and no distro holds: unmatched, no guess', async () => {
+  const h = host('main', { 'workspace.readContext': { workspaceId: 'r1::/home/me/ghost', branch: 'main', displayName: 'main', terminals: [] } }, [])
+  const worker = await mountWorker(main, { host: h })
+  assert.deepEqual(await worker.request('memory.view'), { project: null, workspace: 'main', unmatched: true })
+  await worker.deactivate()
+})
+
 test('look-alikes: the person picks one, remembered through its terminals', async () => {
   const twins = [{ ...ws('main', 'a'), path: '/demo/broken', project: 'broken' }, { ...ws('main', 'b'), path: '/demo/ok', project: 'ok' }]
   const h = host('main', { 'workspace.readContext': { branch: 'main', displayName: 'main', terminals: [{ id: 't-picked' }] } }, twins)

@@ -27,6 +27,29 @@ export function uncOf(w: Wsl): string {
   return `\\\\wsl.localhost\\${w.distro}${w.linux === '/' ? '\\' : w.linux.replace(/\//g, '\\')}`
 }
 
+/** `wsl.exe -l -q --running`: one distribution per line. It prints UTF-16, read here as UTF-8: BOM and NULs are dropped. */
+export function parseDistros(out: string): string[] {
+  return out
+    .replace(/[\uFEFF\0\r]/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+/** The answer of a share's check, or false once `ms` have passed: opening a share can wait on a distribution that is slow to answer. */
+export function withinMs(check: Promise<boolean>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), ms) })
+  return Promise.race([check, late]).finally(() => clearTimeout(timer))
+}
+
+/** The one distribution that holds the path; none, or two, or an unreachable share: null, never a guess. */
+export async function soleHolder(distros: readonly string[], holds: (distro: string) => Promise<boolean>): Promise<string | null> {
+  const held = await Promise.all(distros.map((d) => holds(d).catch(() => false)))
+  const found = distros.filter((_, i) => held[i])
+  return found.length === 1 ? (found[0] as string) : null
+}
+
 /** The home a Linux path lies in (`/home/me`, `/root`), when it says so. */
 export function linuxHomeOf(linux: string): string | null {
   return /^\/home\/[^/]+(?=\/|$)|^\/root(?=\/|$)/.exec(linux)?.[0] ?? null
