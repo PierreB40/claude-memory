@@ -10,14 +10,44 @@ export interface WorkspaceInfo {
   branch: string | null
   /** Orca's host for it: null or `local` here, `wsl:<distro>`, or an SSH host's id. */
   hostId?: string | null
+  /** Found from the context's workspace id, not listed: Orca's plugin host cannot start an agent in it. */
+  viaContext?: boolean
 }
 
 
 export interface FocusedContext {
+  /** `<repo id>::<path>`, plus `::workspace:<uuid>` for a folder: what `workspace.readContext` gives. */
+  workspaceId?: string
   branch: string
   displayName: string
   /** The focused workspace's terminals, as `workspace.readContext` lists them. */
   terminals?: readonly { id: string; title?: string }[]
+}
+
+/**
+ * The Linux path in a context's workspace id, which a WSL-runtime workspace (one `workspace.list`
+ * does not return) carries as `<repo id>::<path>`. A Windows path, or none: null.
+ */
+export function contextPath(workspaceId: string | undefined): string | null {
+  const path = workspaceId?.split('::')[1]
+  return path?.startsWith('/') && !path.startsWith('//') ? path : null
+}
+
+/**
+ * The Linux path a focused context may hold in Orca's WSL runtime: its id's path, unless a listed
+ * workspace is that one (same id, or the same path, as a `\\wsl.localhost` share or on an SSH host).
+ * `workspace.list` gives a workspace another id than the context does, so the path is compared too.
+ */
+export function runtimeCandidate(ctx: FocusedContext, all: readonly WorkspaceInfo[]): string | null {
+  const linux = contextPath(ctx.workspaceId)
+  if (!linux) return null
+  const listed = all.some((w) => w.id === ctx.workspaceId || w.path === linux || wslOf(w.path, w.hostId ?? null)?.linux === linux)
+  return listed ? null : linux
+}
+
+/** The workspace a context describes, once `linux` (its `contextPath`) is found to live in `distro`. */
+export function workspaceFromContext(ctx: FocusedContext, linux: string, distro: string): WorkspaceInfo {
+  return { id: ctx.workspaceId as string, name: ctx.displayName, path: linux, branch: ctx.branch, hostId: `wsl:${distro}`, viaContext: true }
 }
 
 /** Claude Code names a project folder after its path, every non-alphanumeric char turned to `-`. */

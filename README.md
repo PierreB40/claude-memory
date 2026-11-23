@@ -23,10 +23,10 @@ workspaces on macOS, Linux, Windows or WSL (not SSH: see [Limits](#limits)).
 In Orca, open **Settings → Plugins → Add plugin → From Git URL** and enter:
 
 ```text
-https://github.com/PierreB40/claude-memory#v0.4.1
+https://github.com/PierreB40/claude-memory#v0.4.2
 ```
 
-or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.1`.
+or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.2`.
 
 Then open the **Claude Memory** panel in the right sidebar, or click the book in the status bar.
 
@@ -113,6 +113,13 @@ Clicking it shows or hides the sidebar.
   distribution with `wsl.exe`. A `CLAUDE_CONFIG_DIR` set inside WSL is not followed. Notifications
   and read counts need Orca to report the tool calls of agents running in WSL, which it may not do
   yet: the panel and the status bar work without them.
+- **Workspaces of Orca's own WSL runtime.** When Orca on Windows runs its second runtime inside WSL
+  (the host list shows `wsl:<distro>`), Orca's plugin host does not list those workspaces. The
+  plugin finds the focused one from its context id, which holds the Linux path, and the distribution
+  whose share holds that path (none or several: the panel says it cannot tell). Notifications and
+  read counts do not work there, because the plugin cannot find the agent's workspace in Orca's
+  workspace list. *Verify* is not offered there: Orca does not let a plugin start an agent in these
+  workspaces yet.
 - **Not SSH.** On an SSH host, the code and Claude's memory stay on that machine and the plugin
   reads only the one Orca runs on: the panel says the workspace is on another host, the status bar
   stays hidden, and *Verify* is not offered.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2
+
+- Windows with Orca's WSL runtime: a workspace that lives in the WSL runtime (all of a project's
+  workspaces, when Orca runs it inside WSL) now shows its Claude memories, instead of
+  `Workspace “main” is ambiguous` and a lookup in the Windows profile. Orca's plugin host does not
+  list these workspaces, so the plugin reads the Linux path from the focused workspace's id and finds the
+  distribution holding it. *Verify* is hidden for them, as Orca cannot start an agent there from a
+  plugin; the Verify command says so.
+
 ## 0.4.1
 
 - WSL on Windows: a workspace in a WSL distribution finds its Claude's memory in the Linux home,

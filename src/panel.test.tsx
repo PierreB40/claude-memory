@@ -85,6 +85,17 @@ test('what the branch removes waits for the merge: its own group, no action, not
   await v.unmount()
 })
 
+test('Verify is offered, except in a workspace Orca cannot start an agent in', async () => {
+  const stale = memory({ file: 'old.md', title: 'Ancien', cited: 2, missingPaths: ['x/a.vue'] })
+  const offered = await mountWith([{ project: project([stale]), workspace: 'api' }]).view
+  assert.ok(drawn(offered).includes('"Vérifier"'))
+  await offered.unmount()
+  const hidden = await mountWith([{ project: project([stale]), workspace: 'api', noVerify: true }]).view
+  assert.ok(!drawn(hidden).includes('"Vérifier"'), 'no button that cannot work')
+  assert.ok(drawn(hidden).includes('"À vérifier 1" selected'), 'the memories to verify are still listed')
+  await hidden.unmount()
+})
+
 test('search and type filter shape the list, grouped by type', async () => {
   const a = memory({ file: 'a.md', title: 'Bêta', type: 'feedback' })
   const b = memory({ file: 'b.md', title: 'Alpha', type: 'project' })
