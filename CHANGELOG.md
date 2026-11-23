@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2
 
 - Windows with Orca's WSL runtime: a workspace that lives in the WSL runtime (all of a project's
   workspaces, when Orca runs it inside WSL) now shows its Claude memories, instead of
