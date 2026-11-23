@@ -23,10 +23,10 @@ workspaces on macOS, Linux, Windows or WSL (not SSH: see [Limits](#limits)).
 In Orca, open **Settings → Plugins → Add plugin → From Git URL** and enter:
 
 ```text
-https://github.com/PierreB40/claude-memory#v0.4.1
+https://github.com/PierreB40/claude-memory#v0.4.2
 ```
 
-or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.1`.
+or from a terminal: `orca plugin install PierreB40/claude-memory@v0.4.2`.
 
 Then open the **Claude Memory** panel in the right sidebar, or click the book in the status bar.
 
