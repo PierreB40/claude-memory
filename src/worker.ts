@@ -125,12 +125,18 @@ interface Known extends WorkspaceInfo {
   place: Place | null
 }
 
+/**
+ * What Orca's WSL runtime depends on outside the host API: the platform, the distribution holding a
+ * Linux path, and where a workspace's files are read. Tests replace them to play Windows from anywhere.
+ */
+export const wslRuntime = { platform, distroOf: wslDistroOf, placeOf }
+
 /** A workspace of Orca's WSL runtime: its id holds a Linux path, and `workspace.list` does not return it. */
 async function runtimeWorkspace(ctx: FocusedContext, all: WorkspaceInfo[]): Promise<WorkspaceInfo | null> {
-  if (platform() !== 'win32') return null
+  if (wslRuntime.platform() !== 'win32') return null
   const linux = runtimeCandidate(ctx, all)
   if (!linux) return null
-  const distro = await wslDistroOf(linux)
+  const distro = await wslRuntime.distroOf(linux)
   return distro ? workspaceFromContext(ctx, linux, distro) : null
 }
 
@@ -146,7 +152,7 @@ async function focusedWorkspace(orca: OrcaWorkerApi): Promise<{ focused: Known |
   if (!match) return { focused: null, name: ctx.displayName, all, twins: twinsOf(ctx, all, owners) }
   // Known by one terminal, or by the folder its title shows: its other terminals are its own too.
   for (const { id } of ctx.terminals) learnOwner(orca, id, match.id)
-  const place = await placeOf(orca, match)
+  const place = await wslRuntime.placeOf(orca, match)
   const gitFile = place ? await readGitFile(place.checkout) : null
   return { focused: { ...match, gitFile, place }, name: ctx.displayName, all, twins: [] }
 }

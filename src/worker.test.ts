@@ -85,11 +85,66 @@ test('a workspace on an SSH host: said as such, never « remembers nothing »', 
   await here.deactivate()
 })
 
-test('a WSL-style context id the list does not know and no distro holds: unmatched, no guess', async () => {
-  const h = host('main', { 'workspace.readContext': { workspaceId: 'r1::/home/me/ghost', branch: 'main', displayName: 'main', terminals: [] } }, [])
-  const worker = await mountWorker(main, { host: h })
-  assert.deepEqual(await worker.request('memory.view'), { project: null, workspace: 'main', unmatched: true })
-  await worker.deactivate()
+/**
+ * Plays Orca on Windows with its WSL runtime: `distros` hold their Linux paths, read here as local
+ * folders (the share itself is covered in place.test.ts and store.ts).
+ */
+async function onWindows(distros: Record<string, string>, run: () => Promise<void>): Promise<string[]> {
+  const real = { ...main.wslRuntime }
+  const probed: string[] = []
+  main.wslRuntime.platform = () => 'win32'
+  main.wslRuntime.distroOf = async (linux) => {
+    probed.push(linux)
+    return distros[linux] ?? null
+  }
+  main.wslRuntime.placeOf = (orca, w) => real.placeOf(orca, { ...w, hostId: null })
+  try {
+    await run()
+  } finally {
+    Object.assign(main.wslRuntime, real)
+  }
+  return probed
+}
+const runtimeCtx = (path: string) => ({ 'workspace.readContext': { workspaceId: `r1::${path}`, branch: 'main', displayName: 'main', terminals: [] } })
+
+test('a workspace of the WSL runtime of Orca, which the list omits: its memories, no Verify', async () => {
+  const probed = await onWindows({ '/demo/broken': 'Ubuntu' }, async () => {
+    const worker = await french(host('main', runtimeCtx('/demo/broken'), []))
+    const view = await worker.request('memory.view')
+    assert.equal(view.project?.slug, '-demo-broken', 'found from the Linux path in the context id')
+    assert.equal(view.noVerify, true)
+    await assert.rejects(worker.request('memory.verify'), /ne sait pas encore lancer un agent/)
+    await worker.deactivate()
+  })
+  assert.ok(probed.includes('/demo/broken'))
+})
+
+test('a WSL-runtime context id: no guess when no distro holds it, nor when the list knows it, nor off Windows', async () => {
+  await onWindows({}, async () => {
+    const worker = await mountWorker(main, { host: host('main', runtimeCtx('/home/me/ghost'), []) })
+    assert.deepEqual(await worker.request('memory.view'), { project: null, workspace: 'main', unmatched: true })
+    await worker.deactivate()
+  })
+  const listed = [{ ...ws('main', 'r1::/demo/ok'), path: '/demo/ok' }]
+  const known = await onWindows({ '/demo/ok': 'Ubuntu' }, async () => {
+    const worker = await mountWorker(main, { host: host('main', runtimeCtx('/demo/ok'), listed) })
+    const view = await worker.request('memory.view')
+    assert.equal(view.project?.slug, '-demo-ok')
+    assert.equal(view.noVerify, undefined, 'a listed workspace keeps Verify')
+    await worker.deactivate()
+  })
+  assert.deepEqual(known, [], 'a listed workspace: no distro probed')
+  const real = main.wslRuntime.distroOf
+  let probed = false
+  main.wslRuntime.distroOf = async () => ((probed = true), 'Ubuntu')
+  try {
+    const worker = await mountWorker(main, { host: host('main', runtimeCtx('/demo/broken'), []) })
+    assert.equal((await worker.request('memory.view')).unmatched, true, 'macOS or Linux: unchanged')
+    await worker.deactivate()
+  } finally {
+    main.wslRuntime.distroOf = real
+  }
+  assert.equal(probed, false)
 })
 
 test('look-alikes: the person picks one, remembered through its terminals', async () => {
